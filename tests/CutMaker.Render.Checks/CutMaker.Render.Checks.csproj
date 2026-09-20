@@ -8,6 +8,7 @@
     <Compile Include="..\..\src\CutMaker.App\MediaRenderService.cs" Link="MediaRenderService.cs" />
     <Compile Include="..\..\src\CutMaker.App\MediaRenderService.Audio.cs" Link="MediaRenderService.Audio.cs" />
     <Compile Include="..\..\src\CutMaker.App\AudioPreviewCache.cs" Link="AudioPreviewCache.cs" />
+    <Compile Include="..\..\src\CutMaker.App\AudioTimelinePreview.cs" Link="AudioTimelinePreview.cs" />
     <Compile Include="..\..\src\CutMaker.App\PreviewRenderCache.cs" Link="PreviewRenderCache.cs" />
   </ItemGroup>
 </Project>

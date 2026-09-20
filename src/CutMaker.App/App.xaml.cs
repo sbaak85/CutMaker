@@ -12,7 +12,8 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        var smoke = e.Args.Contains("--smoke-test");
+        var audioSmoke = e.Args.Contains("--audio-preview-smoke-test");
+        var smoke = audioSmoke || e.Args.Contains("--smoke-test");
         if (smoke) ShutdownMode = ShutdownMode.OnExplicitShutdown;
         var window = new MainWindow();
         MainWindow = window;
@@ -26,7 +27,28 @@ public partial class App : Application
             window.SuppressClosePrompt = true;
         }
         window.Show();
-        if (smoke) window.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => RunSmoke(window));
+        if (smoke) window.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () =>
+        {
+            if (audioSmoke) RunColdAudioSmoke(window);
+            else RunSmoke(window);
+        });
+    }
+
+    private async void RunColdAudioSmoke(MainWindow window)
+    {
+        var folder = Path.Combine(LayoutSettings.DataDirectory, "audio-smoke");
+        Directory.CreateDirectory(folder);
+        try
+        {
+            await window.RunPreviewCacheSmokeAsync(folder);
+            File.WriteAllText(Path.Combine(folder, "result.txt"), "PASS: first preview in a fresh process plays a 245-second MP3 using the native PCM device, without MediaElement or a full mixed file.");
+            window.Close(); Shutdown(0);
+        }
+        catch (Exception ex)
+        {
+            File.WriteAllText(Path.Combine(folder, "result.txt"), ex.ToString());
+            window.Close(); Shutdown(1);
+        }
     }
 
     private async void RunSmoke(MainWindow window)

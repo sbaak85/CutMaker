@@ -39,6 +39,10 @@ public partial class MainWindow
     private double _previewPlaybackFarthest;
     private PreviewRenderCache? _previewCache;
     private string? _previewRenderKey;
+    private AudioTimelinePreview? _audioPreview;
+    private PcmAudioDevice? _audioDevice;
+    private double PreviewPositionSeconds => _audioDevice is { } audio
+        ? audio.PositionFrames / (double)AudioSampleClock.Rate : PreviewPlayer.Position.TotalSeconds;
     private string PreviewFolder => Path.GetFullPath(Path.Combine(LayoutSettings.DataDirectory, "preview", _previewSessionId));
     private PreviewRenderCache PreviewCache => _previewCache ??= new(PreviewFolder);
     internal Func<CutProject, string, MediaRenderOptions, CancellationToken, Task> RenderStillMediaAsync { get; set; } =
@@ -56,9 +60,19 @@ public partial class MainWindow
         {
             if (PreviewIsReady && _previewPlaying && !_previewScrubbing)
             {
-                var position = PreviewPlayer.Position.TotalSeconds;
+                if (_audioDevice?.Error is { } audioError)
+                {
+                    ReportAudioPreviewFailure(audioError);
+                    return;
+                }
+                var position = PreviewPositionSeconds;
                 _previewPlaybackFarthest = Math.Max(_previewPlaybackFarthest, position);
                 PlayheadSeconds = Math.Clamp(_previewRangeStart + position, 0, PreviewDuration);
+                if (_audioDevice is { Ended: true })
+                {
+                    PausePreview();
+                    PlayheadSeconds = PreviewDuration;
+                }
             }
         };
         PreviewSeekSlider.AddHandler(Mouse.LostMouseCaptureEvent, new MouseEventHandler((_, _) => EndPreviewScrub()), true);
@@ -74,7 +88,9 @@ public partial class MainWindow
         if (!_previewInitialized || _previewShutdown) return;
         PlayheadSeconds = Math.Clamp(PlayheadSeconds, 0, PreviewDuration);
         if (!PreviewIsReady && !_previewPreparing)
-            PreviewHint.Text = PreviewDuration > 0 ? "拖曳時間尺定位\n按「播放」準備完整預覽，之後可直接定位與重播" : "將素材放入軌道，開始編輯";
+            PreviewHint.Text = PreviewDuration <= 0 ? "將素材放入軌道，開始編輯" : PreviewRenderCache.IsAudioOnly(_project)
+                ? "音訊專案 · 按播放直接試聽\n首次載入曲目後可直接定位與重播"
+                : "拖曳時間尺定位\n按「播放」準備完整預覽，之後可直接定位與重播";
         RefreshPreviewControls();
     }
 
@@ -116,6 +132,7 @@ public partial class MainWindow
         _resumeAfterPreviewScrub = false;
         if (!_previewInitialized || _previewShutdown) return;
         _previewTimer.Stop();
+        CloseAudioPreview();
         PreviewPlayer.Close();
         PreviewPlayer.Source = null;
         PreviewStillImage.Source = null;
@@ -198,13 +215,17 @@ public partial class MainWindow
         _previewPlayWhenReady = playWhenReady;
         var folder = PreviewFolder;
         var audioOnly = PreviewRenderCache.IsAudioOnly(snapshot);
-        var reused = PreviewCache.TryGet(key, out var output);
-        if (!reused) output = Path.Combine(folder, $"preview-{revision}{(audioOnly ? ".wav" : ".mp4")}");
-        var preparingLabel = audioOnly ? "正在準備音訊快取" : "正在準備完整影音快取";
+        var output = string.Empty;
+        var reused = !audioOnly && PreviewCache.TryGet(key, out output);
+        if (!audioOnly && !reused) output = Path.Combine(folder, $"preview-{revision}.mp4");
+        var preparingLabel = audioOnly ? "正在載入曲目" : "正在準備完整影音快取";
         PreviewHint.Text = reused ? "正在開啟已暫存的預覽…" : $"{preparingLabel}… 0%";
         PreviewRangeText.Text = $"播放區間 {FormatPreviewTime(_previewRangeStart)} – {FormatPreviewTime(_previewRangeEnd)}";
-        StatusText.Text = "首次準備後可直接定位與重播；可繼續定位，修改影音內容才需更新";
+        StatusText.Text = audioOnly ? "首次解碼曲目後直接即時混音播放，無須製作整首混音檔" : "首次準備後可直接定位與重播；可繼續定位，修改影音內容才需更新";
         RefreshPreviewControls();
+        var phase = audioOnly ? "載入音訊來源" : "製作影音快取";
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        PreviewDiagnostics.Write("prepare-start", $"revision={revision}; audioOnly={audioOnly}; duration={PreviewDuration:0.###}; videoRenderCacheHit={reused}");
         try
         {
             Directory.CreateDirectory(folder);
@@ -213,6 +234,35 @@ public partial class MainWindow
                 if (_previewShutdown || revision != _previewRevision || cancellation.IsCancellationRequested) return;
                 PreviewHint.Text = $"{preparingLabel}… {Math.Clamp(value.Fraction, 0, 1):P0}\n{value.Message}";
             });
+            if (audioOnly)
+            {
+                // Yield once so pending transport/navigation input remains responsive even
+                // when all decoded source files are already cached.
+                await Task.Yield();
+                var audio = await AudioTimelinePreview.PrepareAsync(snapshot, progress, cancellation.Token);
+                try
+                {
+                    cancellation.Token.ThrowIfCancellationRequested();
+                    if (_previewShutdown || revision != _previewRevision) return;
+                    if (key != PreviewRenderCache.CreateKey(snapshot)) throw new IOException("來源檔案在載入期間已變更，請重新播放。");
+                    phase = "開啟音訊裝置";
+                    var device = new PcmAudioDevice((frame, buffer, count) => { audio.ReadFrames(frame, buffer, count); },
+                        audio.DurationFrames, muted: PreviewPlayer.IsMuted);
+                    _audioPreview = audio;
+                    _audioDevice = device;
+                    device.Seek(AudioSampleClock.At(PlayheadSeconds));
+                    _previewReadyRevision = revision;
+                    _previewOpened = true;
+                    PreviewStillImage.Visibility = Visibility.Collapsed;
+                    PreviewHint.Visibility = Visibility.Collapsed;
+                    PreviewRangeText.Text = "音訊即時混音 · 可直接定位與重播";
+                    StatusText.Text = "音訊已就緒 · 直接即時混音播放";
+                    PreviewDiagnostics.Write("audio-ready", $"revision={revision}; elapsedMs={started.ElapsedMilliseconds}");
+                    if (_previewPlayWhenReady) StartPreviewPlayback();
+                    return;
+                }
+                finally { if (!ReferenceEquals(_audioPreview, audio)) audio.Dispose(); }
+            }
             if (!reused)
                 await MediaRenderService.RenderAsync(snapshot, null, output, new MediaRenderOptions(Preview: true,
                     OutputStart: _previewRangeStart, OutputEnd: _previewRangeEnd), progress, cancellation.Token);
@@ -228,15 +278,17 @@ public partial class MainWindow
             PreviewHint.Text = "正在開啟預覽…";
             PreviewPlayer.Volume = 0;
             PreviewPlayer.Source = new Uri(output, UriKind.Absolute);
-            // Manual MediaElement must enter an active clock state to load. Pause immediately;
-            // the volume stays zero until MediaOpened so preparing never emits audio.
+            // Allow the native graph to reach MediaOpened before pausing it. It stays
+            // inaudible until the current sender confirms that loading has completed.
+            phase = "開啟影片播放器";
+            PreviewDiagnostics.Write("video-opening", $"revision={revision}; elapsedMs={started.ElapsedMilliseconds}; file={output}");
             PreviewPlayer.Play();
-            PreviewPlayer.Pause();
             await _previewOpenCompletion.Task.WaitAsync(TimeSpan.FromSeconds(15), cancellation.Token);
             if (_previewShutdown || revision != _previewRevision) return;
             if (key != PreviewRenderCache.CreateKey(snapshot))
                 throw new IOException("來源檔案在開啟期間已變更，請重新播放以更新快取。");
             StatusText.Text = reused ? "已重用預覽快取，可直接定位與重播" : "完整預覽已暫存，可直接定位與重播";
+            PreviewDiagnostics.Write("video-ready", $"revision={revision}; elapsedMs={started.ElapsedMilliseconds}");
             if (_previewPlayWhenReady) StartPreviewPlayback();
         }
         catch (OperationCanceledException)
@@ -250,16 +302,17 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
+            PreviewDiagnostics.Write("prepare-failed", $"phase={phase}; revision={revision}; elapsedMs={started.ElapsedMilliseconds}; {ex}");
             if (!_previewShutdown && revision == _previewRevision)
             {
                 CloseFailedPreview();
-                PreviewHint.Text = $"無法準備預覽\n{ex.Message}";
+                PreviewHint.Text = ex is TimeoutException ? $"{phase}逾時\n影片已處理完成，但播放器未能開啟。請重試；詳細原因已記錄。" : $"{phase}失敗\n{ex.Message}";
                 StatusText.Text = "預覽失敗；剪輯資料仍保留，可重新嘗試";
             }
         }
         finally
         {
-            if (!string.Equals(_previewFile, output, StringComparison.OrdinalIgnoreCase) && !PreviewCache.ContainsFile(output)) DeletePreviewFile(output);
+            if (output.Length > 0 && !string.Equals(_previewFile, output, StringComparison.OrdinalIgnoreCase) && !PreviewCache.ContainsFile(output)) DeletePreviewFile(output);
             if (ReferenceEquals(_previewCancellation, cancellation)) _previewCancellation = null;
             if (!_previewShutdown && revision == _previewRevision)
             {
@@ -317,7 +370,7 @@ public partial class MainWindow
     }
     private void PreviewPlayer_MediaEnded(object sender, RoutedEventArgs e)
     {
-        if (!ReferenceEquals(sender, PreviewPlayer) || !PreviewIsReady || !_previewPlaying || _previewScrubbing) return;
+        if (_audioDevice is not null || !ReferenceEquals(sender, PreviewPlayer) || !PreviewIsReady || !_previewPlaying || _previewScrubbing) return;
         // Also reject a queued end from an earlier seek of this same player. Use the
         // exact rendered range, since Windows can truncate NaturalDuration to seconds.
         var duration = _previewRangeEnd - _previewRangeStart;
@@ -330,7 +383,7 @@ public partial class MainWindow
     }
     private void PreviewPlayer_MediaFailed(object? sender, ExceptionRoutedEventArgs e)
     {
-        if (!ReferenceEquals(sender, PreviewPlayer) || _previewShutdown || _previewReadyRevision != _previewRevision) return;
+        if (_audioDevice is not null || _previewFile is null || !ReferenceEquals(sender, PreviewPlayer) || _previewShutdown || _previewReadyRevision != _previewRevision) return;
         var error = e.ErrorException ?? new InvalidOperationException("Windows 無法播放產生的預覽檔案。");
         _previewOpenCompletion?.TrySetException(error);
         CloseFailedPreview();
@@ -344,12 +397,33 @@ public partial class MainWindow
         _previewReadyRevision = -1;
         _previewPlaying = false;
         _previewTimer.Stop();
+        CloseAudioPreview();
         PreviewPlayer.Close();
         PreviewPlayer.Source = null;
         if (_previewFile is not null) PreviewCache.RemoveFile(_previewFile);
         DeletePreviewFile(_previewFile);
         _previewFile = null;
         PreviewHint.Visibility = Visibility.Visible;
+    }
+
+    private void CloseAudioPreview()
+    {
+        var device = _audioDevice;
+        var mixer = _audioPreview;
+        _audioDevice = null;
+        _audioPreview = null;
+        try { device?.Dispose(); }
+        catch (Exception ex) { PreviewDiagnostics.Write("audio-close-failed", ex.ToString()); }
+        finally { mixer?.Dispose(); }
+    }
+
+    private void ReportAudioPreviewFailure(Exception error)
+    {
+        CloseFailedPreview();
+        PreviewHint.Text = $"音訊播放失敗\n{error.Message}";
+        StatusText.Text = "請確認音訊輸出裝置後重新播放；詳細原因已記錄";
+        PreviewDiagnostics.Write("audio-playback-failed", error.ToString());
+        RefreshPreviewControls();
     }
 
     private void StartPreviewPlayback()
@@ -361,7 +435,13 @@ public partial class MainWindow
         PreviewStillImage.Visibility = Visibility.Collapsed;
         PreviewHint.Visibility = Visibility.Collapsed;
         _previewPlaybackFarthest = Math.Max(0, PlayheadSeconds - _previewRangeStart);
-        PreviewPlayer.Play();
+        try
+        {
+            if (_audioDevice is { } audio) audio.Resume();
+            else PreviewPlayer.Play();
+        }
+        catch (Exception ex) when (_audioDevice is not null && ex is InvalidOperationException or IOException)
+        { ReportAudioPreviewFailure(ex); return; }
         _previewPlaying = true;
         _previewTimer.Start();
         RefreshPreviewControls();
@@ -369,7 +449,16 @@ public partial class MainWindow
     private void PausePreview()
     {
         if (!_previewInitialized || _previewShutdown) return;
-        if (PreviewIsReady) PreviewPlayer.Pause();
+        if (PreviewIsReady)
+        {
+            try
+            {
+                if (_audioDevice is { } audio) audio.Pause();
+                else PreviewPlayer.Pause();
+            }
+            catch (Exception ex) when (_audioDevice is not null && ex is InvalidOperationException or IOException)
+            { ReportAudioPreviewFailure(ex); return; }
+        }
         _previewPlaying = false;
         _previewTimer.Stop();
         RefreshPreviewControls();
@@ -385,7 +474,7 @@ public partial class MainWindow
         {
             PreviewStillImage.Source = null;
             PreviewStillImage.Visibility = Visibility.Collapsed;
-            PreviewHint.Text = PreviewIsReady ? "音訊快取已就緒" : "音訊專案 · 按播放準備音訊快取";
+            PreviewHint.Text = PreviewIsReady ? "音訊已就緒" : "音訊專案 · 按播放直接試聽";
             PreviewHint.Visibility = PreviewIsReady ? Visibility.Collapsed : Visibility.Visible;
             PreviewRangeText.Text = $"音訊定位 {FormatPreviewTime(PlayheadSeconds)}";
             _previewFrameTask = Task.CompletedTask;
@@ -459,7 +548,13 @@ public partial class MainWindow
             _previewFrameCancellation?.Cancel();
             PreviewStillImage.Visibility = Visibility.Collapsed;
             PreviewHint.Visibility = Visibility.Collapsed;
-            PreviewPlayer.Position = TimeSpan.FromSeconds(PlayheadSeconds - _previewRangeStart);
+            try
+            {
+                if (_audioDevice is { } audio) audio.Seek(AudioSampleClock.At(PlayheadSeconds));
+                else PreviewPlayer.Position = TimeSpan.FromSeconds(PlayheadSeconds - _previewRangeStart);
+            }
+            catch (Exception ex) when (_audioDevice is not null && ex is InvalidOperationException or IOException)
+            { ReportAudioPreviewFailure(ex); }
         }
         else
         {

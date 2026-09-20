@@ -5,6 +5,17 @@ if ($LASTEXITCODE -ne 0) { throw "Build failed: $LASTEXITCODE" }
 if ($LASTEXITCODE -ne 0) { throw "Core checks failed: $LASTEXITCODE" }
 $env:CUTMAKER_DATA_DIR = Join-Path $script:CutMakerRoot 'runtime\verification'
 $app = Join-Path $script:CutMakerRoot 'src\CutMaker.App\bin\Release\net10.0-windows\CutMaker.exe'
+$audioProcess = Start-Process -FilePath $app -ArgumentList '--audio-preview-smoke-test' -WindowStyle Hidden -PassThru
+if (-not $audioProcess.WaitForExit(60000)) {
+    $audioProcess.Kill()
+    throw 'Cold audio preview check timed out.'
+}
+$audioProcess.Refresh()
+$audioResult = Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'audio-smoke\result.txt') -Raw
+Write-Output $audioResult
+if ($audioProcess.ExitCode -ne 0 -or -not $audioResult.StartsWith('PASS:')) { throw "Cold audio preview check failed: $($audioProcess.ExitCode)" }
+Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'audio-smoke\preview-cache-result.txt')
+Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'audio-smoke\pcm-device-checks.txt')
 $process = Start-Process -FilePath $app -ArgumentList '--smoke-test' -WindowStyle Hidden -PassThru
 if (-not $process.WaitForExit(180000)) {
     $process.Kill()

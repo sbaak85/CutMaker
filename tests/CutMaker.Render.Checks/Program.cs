@@ -8,6 +8,15 @@ try
 {
 var folder = Path.GetFullPath(args.FirstOrDefault() ?? Path.Combine("runtime", "render-checks"));
 Directory.CreateDirectory(folder);
+if (args.Contains("--mixer-only"))
+{
+    await AudioTimelinePreviewChecks.Run(Path.Combine(folder, "audio-timeline-preview"), (condition, message) =>
+    {
+        if (!condition) throw new InvalidOperationException(message);
+        Console.WriteLine("PASS: " + message);
+    });
+    return;
+}
 if (args.Contains("--audio-only"))
 {
     await AudioContinuityChecks.Run(Path.Combine(folder, "audio-continuity"), (condition, message) =>
@@ -16,6 +25,11 @@ if (args.Contains("--audio-only"))
         Console.WriteLine("PASS: " + message);
     });
     await AudioPreviewCacheChecks.Run(Path.Combine(folder, "audio-preview-cache"), (condition, message) =>
+    {
+        if (!condition) throw new InvalidOperationException(message);
+        Console.WriteLine("PASS: " + message);
+    });
+    await AudioTimelinePreviewChecks.Run(Path.Combine(folder, "audio-timeline-preview"), (condition, message) =>
     {
         if (!condition) throw new InvalidOperationException(message);
         Console.WriteLine("PASS: " + message);
@@ -219,6 +233,7 @@ using (var cancellation = new CancellationTokenSource())
 Check(hashes.All(pair => SHA256.HashData(File.ReadAllBytes(pair.Key)).SequenceEqual(pair.Value)), "source hashes remain unchanged after canceled render");
 await AudioContinuityChecks.Run(Path.Combine(folder, "audio-continuity"), Check);
 await AudioPreviewCacheChecks.Run(Path.Combine(folder, "audio-preview-cache"), Check);
+await AudioTimelinePreviewChecks.Run(Path.Combine(folder, "audio-timeline-preview"), Check);
 await File.WriteAllLinesAsync(Path.Combine(folder, "render-result.txt"), notes);
 Console.WriteLine($"{notes.Count}/{notes.Count} render integration checks passed. Artifacts: {folder}");
 
