@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
 using CutMaker.Core;
 
 namespace CutMaker.App;
@@ -39,6 +41,7 @@ internal static class TimelineSmokeChecks
         window.TimelineOffsetSeconds = 0;
         window.TimelinePixelsPerSecond = 40;
         Require(!window.HasUnsavedChanges, "A loaded timeline must start clean.");
+        VerifyWheelZoom(window);
 
         var visualDrag = window.CreateLibraryDragData(visual.Id);
         var audioDrag = window.CreateLibraryDragData(audio.Id);
@@ -131,12 +134,58 @@ internal static class TimelineSmokeChecks
             .AppendLine("drag preview without mutation; full measured source duration; SourceIn zero; dirty state and selection;")
             .AppendLine("wrong-track, missing-track, locked-track and overlap rejection without mutation; repeated assets with independent IDs;")
             .AppendLine("touching-edge snapping; nonzero viewport offset and zoom mapping; selected-clip removal preserves library assets;")
+            .AppendLine("Ctrl-wheel pointer anchoring; slider synchronization; ordinary-wheel passthrough; zoom limits and viewport boundaries; view-only zoom;")
             .AppendLine("exact save/load restoration; old-project payload rejection; original source bytes unchanged.")
             .AppendLine($"Visual source: {visual.Kind} | {visual.Duration:R} seconds | {visual.Path}")
             .AppendLine($"Audio source: {audio.Duration:R} seconds | {audio.Path}");
         foreach (var clip in window.CurrentProject.Clips)
             report.AppendLine($"Clip {clip.Id} | {clip.TrackId} | start {clip.Start:R} | duration {clip.Duration:R} | source in {clip.SourceIn:R}");
         File.WriteAllText(reportPath, report.ToString());
+    }
+
+    private static void VerifyWheelZoom(MainWindow window)
+    {
+        window.UpdateLayout();
+        var slider = (Slider)window.FindName("TimelineZoom");
+        var scroll = (System.Windows.Controls.Primitives.ScrollBar)window.FindName("TimelineHorizontalScroll");
+        var tracks = (ScrollViewer)window.FindName("TimelineTrackScroll");
+        var before = JsonSerializer.Serialize(window.CurrentProject);
+        var dirty = window.HasUnsavedChanges;
+        var playhead = window.PlayheadSeconds;
+        slider.Value = 40;
+        window.TimelineOffsetSeconds = 12;
+        const double x = 200;
+        var anchoredTime = 12 + x / 40;
+        Require(!window.TryZoomTimelineWheel(120, ModifierKeys.None, x), "Ordinary wheel must remain available for vertical scrolling");
+        Near(40, window.TimelinePixelsPerSecond, "Ordinary wheel keeps scale");
+        Require(window.TryZoomTimelineWheel(120, ModifierKeys.Control, x), "Ctrl-wheel must be handled");
+        Require(window.TimelinePixelsPerSecond > 40, "Wheel up zooms in");
+        Near(anchoredTime, window.TimelineOffsetSeconds + x / window.TimelinePixelsPerSecond, "Zoom-in preserves pointer time");
+        Near(window.TimelinePixelsPerSecond, slider.Value, "Wheel updates the slider");
+        window.TryZoomTimelineWheel(-120, ModifierKeys.Control, x);
+        Near(40, slider.Value, "Opposite wheel restores scale");
+        Near(12, window.TimelineOffsetSeconds, "Opposite wheel restores viewport");
+        var rightX = tracks.ViewportWidth - window.TrackHeaderWidth - 10;
+        window.TimelineOffsetSeconds = scroll.Maximum;
+        var rightTime = window.TimelineOffsetSeconds + rightX / window.TimelinePixelsPerSecond;
+        window.TryZoomTimelineWheel(120, ModifierKeys.Control, rightX);
+        Near(rightTime, window.TimelineOffsetSeconds + rightX / window.TimelinePixelsPerSecond, "Right edge anchor with visible vertical scrollbar");
+        Require(window.TimelineOffsetSeconds <= scroll.Maximum, "Zoom offset remains inside scroll range");
+        slider.Value = 40;
+        window.TimelineOffsetSeconds = 0;
+        window.TryZoomTimelineWheel(-120, ModifierKeys.Control, x);
+        Near(0, window.TimelineOffsetSeconds, "Zoom-out at project start clamps to zero");
+        slider.Value = slider.Maximum;
+        window.TryZoomTimelineWheel(120, ModifierKeys.Control, x);
+        Near(slider.Maximum, window.TimelinePixelsPerSecond, "Maximum zoom is respected");
+        slider.Value = slider.Minimum;
+        window.TryZoomTimelineWheel(-120, ModifierKeys.Control, x);
+        Near(slider.Minimum, window.TimelinePixelsPerSecond, "Minimum zoom is respected");
+        Require(!window.TryZoomTimelineWheel(120, ModifierKeys.Control, -1), "Track-name column does not trigger horizontal zoom");
+        slider.Value = 40;
+        window.TimelineOffsetSeconds = 0;
+        Require(before == JsonSerializer.Serialize(window.CurrentProject) && dirty == window.HasUnsavedChanges && playhead == window.PlayheadSeconds,
+            "Zoom preserves project contents, dirty state and playhead");
     }
 
     private static Clip Drop(MainWindow window, IDataObject data, string trackId, double pointerX)

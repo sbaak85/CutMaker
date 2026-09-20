@@ -53,6 +53,10 @@ public partial class App : Application
             await SettleLayout(window);
             window.VerifyLayoutBounds();
             Render(window, Path.Combine(folder, "workspace-timeline.png"));
+            window.TryZoomTimelineWheel(360, System.Windows.Input.ModifierKeys.Control, 200);
+            await SettleLayout(window);
+            Render(window, Path.Combine(folder, "workspace-wheel-zoom.png"));
+            window.TryZoomTimelineWheel(-360, System.Windows.Input.ModifierKeys.Control, 200);
 
             EditingSmokeChecks.Run(window, folder);
             await SettleLayout(window);

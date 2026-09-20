@@ -178,18 +178,18 @@
                     <TextBlock x:Name="TrackCount" DockPanel.Dock="Right" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" />
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,18,0">
                         <TextBlock Text="縮放" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
-                        <Slider x:Name="TimelineZoom" Width="100" Minimum="10" Maximum="120" Value="40" ValueChanged="TimelineZoom_Changed" VerticalAlignment="Center" ToolTip="調整時間軸顯示比例" />
+                        <Slider x:Name="TimelineZoom" Width="100" Minimum="10" Maximum="120" Value="40" ValueChanged="TimelineZoom_Changed" VerticalAlignment="Center" ToolTip="調整時間軸水平比例；也可在軌道或時間尺上按 Ctrl＋滾輪縮放" />
                     </StackPanel>
                 </DockPanel>
                 <Grid Grid.Row="1" Margin="0,8,0,0">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="{Binding TrackHeaderWidth, RelativeSource={RelativeSource AncestorType=Window}}" /><ColumnDefinition Width="8" /><ColumnDefinition /></Grid.ColumnDefinitions>
                     <TextBlock Text="軌道" Foreground="{StaticResource MutedBrush}" />
-                    <local:TimelineRuler Grid.Column="2" PixelsPerSecond="{Binding TimelinePixelsPerSecond, RelativeSource={RelativeSource AncestorType=Window}}" OffsetSeconds="{Binding TimelineOffsetSeconds, RelativeSource={RelativeSource AncestorType=Window}}"
+                    <local:TimelineRuler x:Name="TimelineTimeRuler" Grid.Column="2" PreviewMouseWheel="Timeline_MouseWheel" PixelsPerSecond="{Binding TimelinePixelsPerSecond, RelativeSource={RelativeSource AncestorType=Window}}" OffsetSeconds="{Binding TimelineOffsetSeconds, RelativeSource={RelativeSource AncestorType=Window}}"
                                          PlayheadSeconds="{Binding PlayheadSeconds, RelativeSource={RelativeSource AncestorType=Window}}" MouseLeftButtonDown="TimelineRuler_MouseDown" MouseMove="TimelineRuler_MouseMove" MouseLeftButtonUp="TimelineRuler_MouseUp" />
                 </Grid>
-                <Grid x:Name="TimelineContent" Grid.Row="2" SizeChanged="TimelineContent_SizeChanged">
+                <Grid x:Name="TimelineContent" Grid.Row="2" SizeChanged="TimelineContent_SizeChanged" PreviewMouseWheel="Timeline_MouseWheel">
                     <Grid.ColumnDefinitions><ColumnDefinition x:Name="TrackHeaderColumn" Width="250" MinWidth="180" /><ColumnDefinition Width="8" /><ColumnDefinition Width="*" MinWidth="280" /></Grid.ColumnDefinitions>
-                <ScrollViewer Grid.ColumnSpan="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ScrollViewer x:Name="TimelineTrackScroll" Grid.ColumnSpan="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="TimelineTrackScroll_Changed">
                     <ItemsControl x:Name="TrackItems">
                         <ItemsControl.ItemTemplate><DataTemplate>
                             <Grid Margin="0,0,0,6" MinHeight="74">

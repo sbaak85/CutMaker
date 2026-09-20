@@ -53,12 +53,44 @@ public partial class MainWindow
         TimelinePixelsPerSecond = e.NewValue;
         UpdateTimelineViewport();
     }
+    private void Timeline_MouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (TryZoomTimelineWheel(e.Delta, Keyboard.Modifiers, e.GetPosition(TimelineTimeRuler).X))
+            e.Handled = true;
+    }
+
+    internal bool TryZoomTimelineWheel(int delta, ModifierKeys modifiers, double pointerX)
+    {
+        if ((modifiers & ModifierKeys.Control) == 0 || delta == 0 || !double.IsFinite(pointerX) ||
+            pointerX < 0 || pointerX > TimelineViewportWidth) return false;
+        // Keep captured trim/move/scrub coordinates stable until the current gesture ends.
+        if (_pointerOriginal is not null || _draggingFromLibrary || _previewScrubbing) return true;
+        var oldScale = TimelinePixelsPerSecond;
+        var anchorTime = TimelineOffsetSeconds + pointerX / oldScale;
+        var scale = Math.Clamp(oldScale * Math.Pow(1.2, Math.Clamp(delta / 120.0, -20, 20)),
+            TimelineZoom.Minimum, TimelineZoom.Maximum);
+        if (Math.Abs(scale - oldScale) < 0.0000001) return true;
+        TimelineZoom.Value = scale;
+        // The slider callback updates the scroll range before restoring the pointer's time anchor.
+        TimelinePixelsPerSecond = scale;
+        UpdateTimelineViewport();
+        TimelineOffsetSeconds = Math.Clamp(anchorTime - pointerX / scale, 0, TimelineHorizontalScroll.Maximum);
+        return true;
+    }
+
+    private double TimelineViewportWidth => Math.Max(1,
+        (TimelineTrackScroll?.ViewportWidth is > 0 ? TimelineTrackScroll.ViewportWidth
+            : (TimelineContent?.ActualWidth ?? 0) - SystemParameters.VerticalScrollBarWidth) - TrackHeaderWidth - 8);
+
+    private void TimelineTrackScroll_Changed(object sender, ScrollChangedEventArgs e)
+    {
+        if (e.ViewportWidthChange != 0) UpdateTimelineViewport();
+    }
     private void TimelineContent_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateTimelineViewport();
     private void UpdateTimelineViewport()
     {
         if (TimelineContent is null || TimelineHorizontalScroll is null || TimelineContent.ActualWidth <= 0) return;
-        var viewport = Math.Max(1, TimelineContent.ActualWidth - TrackHeaderWidth - 8 - SystemParameters.VerticalScrollBarWidth);
-        var visibleSeconds = viewport / TimelinePixelsPerSecond;
+        var visibleSeconds = TimelineViewportWidth / TimelinePixelsPerSecond;
         var end = _project.Clips.Count > 0 ? _project.Clips.Max(clip => clip.End) : 0;
         // Rendering is viewport-based. Even long media does not allocate a giant canvas.
         var length = Math.Max(60, end + 30);
