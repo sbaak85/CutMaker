@@ -1,0 +1,28 @@
+name: Windows build and editing-export checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Build
+        run: dotnet build CutMaker.slnx --configuration Release
+      - name: Core checks
+        run: dotnet run --project tests/CutMaker.Core.Checks/CutMaker.Core.Checks.csproj --configuration Release --no-build
+      - name: Prepare project-local FFmpeg
+        shell: pwsh
+        run: ./scripts/setup-ffmpeg.ps1
+      - name: Actual MP4 and MP3 output checks
+        run: dotnet run --project tests/CutMaker.Render.Checks/CutMaker.Render.Checks.csproj --configuration Release --no-build

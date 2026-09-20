@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CutMaker.App/CutMaker.App.csproj" />
+    <Project Path="src/CutMaker.Core/CutMaker.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CutMaker.Core.Checks/CutMaker.Core.Checks.csproj" />
+    <Project Path="tests/CutMaker.Render.Checks/CutMaker.Render.Checks.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,35 @@
+# Local toolchain, packages, builds, editor state
+.tools/
+.cache/
+.vs/
+.idea/
+**/bin/
+**/obj/
+artifacts/
+runtime/
+*.user
+*.suo
+*.log
+TestResults/
+
+# User projects, originals, proxies and rendered output
+projects/
+media/
+exports/
+*.cutmaker
+*.cutmaker.bak
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.mp3
+*.wav
+*.flac
+*.aac
+*.m4a
+*.ogg
+
+# Local secrets
+.env
+.env.*
+!.env.example
