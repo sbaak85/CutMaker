@@ -21,7 +21,7 @@
                 <TextBlock Text="CutMaker" FontSize="25" FontWeight="SemiBold" VerticalAlignment="Center" />
                 <TextBlock Text="專注每一段畫面與聲音" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="18,0,0,0" />
             </StackPanel>
-            <TextBlock Grid.Column="1" Text="0.2 · 剪輯原型" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="0.3 · 輕量剪輯版" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
         </Grid>
         <WrapPanel x:Name="ProjectToolbar" Grid.Row="1">
             <Button Content="新增專案" Click="New_Click" ToolTip="Ctrl+N" />
@@ -30,6 +30,8 @@
             <Button Content="另存新檔" Click="SaveAs_Click" />
             <Button x:Name="UndoButton" Content="復原" Click="Undo_Click" ToolTip="Ctrl+Z" />
             <Button x:Name="RedoButton" Content="重做" Click="Redo_Click" ToolTip="Ctrl+Y" />
+            <Button Content="備份復原" Click="Recovery_Click" />
+            <Button Content="輸出設定" Click="OutputSettings_Click" />
             <Button x:Name="ExportButton" Content="匯出 MP4／MP3" Click="Export_Click" Background="#24534D" />
             <Button x:Name="CancelRenderButton" Content="取消匯出" Click="CancelRender_Click" Visibility="Collapsed" />
             <Button Content="重設版面" Click="ResetLayout_Click" />
@@ -55,6 +57,7 @@
                     </DockPanel>
                     <TextBlock Grid.Row="1" Text="拖入檔案匯入，再把素材拖到軌道" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,12" TextWrapping="Wrap" />
                     <DataGrid x:Name="AssetGrid" Grid.Row="2" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False"
+                              VirtualizingPanel.ScrollUnit="Pixel"
                               CanUserDeleteRows="False" CanUserResizeColumns="True" CanUserReorderColumns="False"
                               HeadersVisibility="Column" GridLinesVisibility="None" Background="#11151D" Foreground="#EAF0FA"
                               BorderThickness="0" RowBackground="#1D2533" AlternatingRowBackground="#18202B" MinColumnWidth="80" MinRowHeight="32"
@@ -89,7 +92,10 @@
                             </DockPanel>
                             <ProgressBar Height="3" IsIndeterminate="True" Foreground="#78DCCB" Background="#293348" Margin="0,6,0,0" />
                         </StackPanel>
-                        <TextBlock x:Name="AssetHint" Text="MP4 · MP3 · WAV · PNG · JPG／JPEG" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" />
+                        <DockPanel>
+                            <Button x:Name="RelinkAssetButton" Content="重新連結" Click="RelinkAsset_Click" DockPanel.Dock="Right" Padding="8,4" Margin="8,0,0,0" ToolTip="重新連結所選素材：來源搬家或遺失時，選擇新的檔案位置" />
+                            <TextBlock x:Name="AssetHint" Text="MP4 · MP3 · WAV · PNG · JPG／JPEG" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </DockPanel>
                         <Button x:Name="ImportDetailsButton" Content="查看略過原因" Click="ImportDetails_Click" Visibility="Collapsed" HorizontalAlignment="Left" Padding="8,4" Margin="0,8,0,0" />
                     </StackPanel>
                 </Grid>
@@ -103,6 +109,7 @@
                         <Grid>
                             <MediaElement x:Name="PreviewPlayer" LoadedBehavior="Manual" UnloadedBehavior="Manual" Stretch="Uniform"
                                           MediaOpened="PreviewPlayer_MediaOpened" MediaEnded="PreviewPlayer_MediaEnded" MediaFailed="PreviewPlayer_MediaFailed" />
+                            <Image x:Name="PreviewStillImage" Stretch="Uniform" IsHitTestVisible="False" Visibility="Collapsed" />
                             <TextBlock x:Name="PreviewHint" Text="放入片段後，按更新預覽" Foreground="#C5D2E4" TextAlignment="Center" TextWrapping="Wrap" VerticalAlignment="Center" Margin="12" IsHitTestVisible="False" />
                         </Grid>
                     </Border>
@@ -116,6 +123,7 @@
                             <Button x:Name="PreviewCancelButton" Content="取消" Click="CancelPreview_Click" Visibility="Collapsed" Padding="8,5" />
                         </WrapPanel>
                         <TextBlock x:Name="PreviewTimeText" Text="00:00.000" FontFamily="Consolas" FontSize="14" HorizontalAlignment="Center" Foreground="#78DCCB" Margin="0,5,0,0" />
+                        <TextBlock x:Name="PreviewRangeText" Foreground="{StaticResource MutedBrush}" FontSize="11" HorizontalAlignment="Center" TextWrapping="Wrap" Margin="0,4,0,0" />
                     </StackPanel>
                 </Grid>
             </Border>
@@ -138,9 +146,33 @@
                             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                             <TextBlock Text="淡入（秒）" /><TextBlock Grid.Column="2" Text="淡出（秒）" />
                             <TextBox x:Name="FadeInBox" Grid.Row="1" Margin="0,4,0,6" /><TextBox x:Name="FadeOutBox" Grid.Row="1" Grid.Column="2" Margin="0,4,0,6" />
-                            <ComboBox x:Name="FadeInCurveBox" Grid.Row="2" MinHeight="28" /><ComboBox x:Name="FadeOutCurveBox" Grid.Row="2" Grid.Column="2" MinHeight="28" />
+                            <ComboBox x:Name="FadeInCurveBox" Grid.Row="2" MinHeight="28" SelectionChanged="FadeCurve_SelectionChanged" /><ComboBox x:Name="FadeOutCurveBox" Grid.Row="2" Grid.Column="2" MinHeight="28" SelectionChanged="FadeCurve_SelectionChanged" />
                         </Grid>
-                        <TextBlock Text="Fade 會同時作用於畫面透明度與聲音。最上方影片軌顯示在前景。" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,6" FontSize="11" />
+                        <Expander Header="進階 Fade／獨立音訊" Foreground="#EAF0FA" Margin="0,10,0,0">
+                            <StackPanel Margin="0,8,0,0">
+                                <TextBlock Text="畫面淡化方式" />
+                                <ComboBox x:Name="VideoFadeModeBox" MinHeight="28" Margin="0,4,0,8" />
+                                <TextBlock Text="自訂曲線控制點（0–1）" />
+                                <TextBlock Text="固定時間點 1/3、2/3 的強度；選自訂曲線後可編輯。" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,6" />
+                                <UniformGrid Columns="2">
+                                    <TextBlock Text="淡入控制 1" /><TextBlock Text="淡入控制 2" />
+                                    <TextBox x:Name="FadeInControl1Box" Margin="0,4,4,6" /><TextBox x:Name="FadeInControl2Box" Margin="4,4,0,6" />
+                                    <TextBlock Text="淡出控制 1" /><TextBlock Text="淡出控制 2" />
+                                    <TextBox x:Name="FadeOutControl1Box" Margin="0,4,4,6" /><TextBox x:Name="FadeOutControl2Box" Margin="4,4,0,6" />
+                                </UniformGrid>
+                                <CheckBox x:Name="SeparateAudioFadesBox" Content="音訊使用獨立 Fade" Foreground="#EAF0FA" Checked="EffectsMode_Changed" Unchecked="EffectsMode_Changed" Margin="0,4,0,8" />
+                                <UniformGrid Columns="2">
+                                    <TextBlock Text="音訊淡入（秒）" /><TextBlock Text="音訊淡出（秒）" />
+                                    <TextBox x:Name="AudioFadeInBox" Margin="0,4,4,6" /><TextBox x:Name="AudioFadeOutBox" Margin="4,4,0,6" />
+                                    <ComboBox x:Name="AudioFadeInCurveBox" Margin="0,0,4,6" MinHeight="28" SelectionChanged="FadeCurve_SelectionChanged" /><ComboBox x:Name="AudioFadeOutCurveBox" Margin="4,0,0,6" MinHeight="28" SelectionChanged="FadeCurve_SelectionChanged" />
+                                    <TextBlock Text="音訊淡入控制 1" /><TextBlock Text="音訊淡入控制 2" />
+                                    <TextBox x:Name="AudioFadeInControl1Box" Margin="0,4,4,6" /><TextBox x:Name="AudioFadeInControl2Box" Margin="4,4,0,6" />
+                                    <TextBlock Text="音訊淡出控制 1" /><TextBlock Text="音訊淡出控制 2" />
+                                    <TextBox x:Name="AudioFadeOutControl1Box" Margin="0,4,4,6" /><TextBox x:Name="AudioFadeOutControl2Box" Margin="4,4,0,6" />
+                                </UniformGrid>
+                            </StackPanel>
+                        </Expander>
+                        <TextBlock Text="預設畫面與聲音共用 Fade。上方影片軌顯示在前景。" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,6" FontSize="11" />
                         <Button x:Name="ApplyClipButton" Content="套用片段設定" Click="ApplyClip_Click" Margin="0,4,0,12" />
                         <Expander Header="軌道設定" IsExpanded="True" Foreground="#EAF0FA" Margin="0,0,0,12">
                             <StackPanel Margin="0,8,0,0">
@@ -149,6 +181,7 @@
                                 <TextBox x:Name="TrackVolumeBox" Margin="0,4,0,8" />
                                 <WrapPanel><CheckBox x:Name="TrackMutedBox" Content="靜音／隱藏" Foreground="#EAF0FA" Margin="0,0,12,0" /><CheckBox x:Name="TrackLockedBox" Content="鎖定" Foreground="#EAF0FA" /></WrapPanel>
                                 <Button x:Name="ApplyTrackButton" Content="套用軌道設定" Click="ApplyTrack_Click" Margin="0,8,0,0" />
+                                <WrapPanel Margin="0,8,0,0"><Button Content="上移" Click="MoveTrackUp_Click" Padding="8,5" /><Button Content="下移" Click="MoveTrackDown_Click" Padding="8,5" /><Button Content="刪除軌道" Click="DeleteTrack_Click" Padding="8,5" ToolTip="移除這條軌道與其片段；Ctrl+Z 可復原" /></WrapPanel>
                             </StackPanel>
                         </Expander>
                         <TextBlock Text="專案屬性" FontSize="16" FontWeight="SemiBold" Margin="0,8,0,12" />
@@ -158,6 +191,7 @@
                         <TextBlock x:Name="ProjectFormat" Text="1920 × 1080 / 30 fps" TextWrapping="Wrap" />
                         <TextBlock Text="專案位置" Foreground="{StaticResource MutedBrush}" Margin="0,22,0,8" />
                         <TextBlock x:Name="ProjectLocation" Text="尚未儲存" TextWrapping="Wrap" Foreground="#C5D2E4" />
+                        <TextBlock x:Name="RecoveryStatusText" Text="每 30 秒備份未存變更" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,0" FontSize="11" />
                         <Border Background="#213C3A" CornerRadius="5" Padding="12" Margin="0,24,0,0">
                             <TextBlock Text="拖曳面板間的分隔線調整空間。版面大小會自動記住。" Foreground="#AFE6DA" TextWrapping="Wrap" />
                         </Border>
@@ -169,18 +203,31 @@
         <Border Grid.Row="4" Background="{StaticResource PanelBrush}" CornerRadius="6" Padding="14">
             <Grid>
                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="34" /><RowDefinition /><RowDefinition Height="20" /></Grid.RowDefinitions>
-                <DockPanel LastChildFill="False">
+                <WrapPanel>
                     <TextBlock Text="時間軸" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,22,0" />
                     <Button Content="＋ 影片軌" Click="AddVideo_Click" Padding="12,6" />
                     <Button Content="＋ 音訊軌" Click="AddAudio_Click" Padding="12,6" />
                     <Button x:Name="RemoveClipButton" Content="移除片段" Click="RemoveClip_Click" Padding="12,6" IsEnabled="False" ToolTip="選取片段後按 Delete；來源檔案會保留" />
                     <Button x:Name="SplitClipButton" Content="切割" Click="SplitClip_Click" Padding="12,6" ToolTip="將選取片段在播放頭位置切開 · Ctrl+B" />
+                    <Menu Background="Transparent" Foreground="#EAF0FA" Margin="0,0,8,8" VerticalAlignment="Center">
+                        <MenuItem Header="編輯 ▾" Padding="8,7" Background="#253247" Foreground="#EAF0FA">
+                            <MenuItem.Resources><Style TargetType="MenuItem"><Setter Property="Foreground" Value="#17202E" /></Style></MenuItem.Resources>
+                            <MenuItem Header="全選片段" InputGestureText="Ctrl+A" Click="SelectAllClips_Click" />
+                            <MenuItem Header="複製" InputGestureText="Ctrl+C" Click="CopyClips_Click" />
+                            <MenuItem Header="貼到播放頭" InputGestureText="Ctrl+V" Click="PasteClips_Click" />
+                            <MenuItem Header="複製到尾端" InputGestureText="Ctrl+D" Click="DuplicateClips_Click" />
+                            <Separator />
+                            <MenuItem Header="同軌波紋刪除" Click="RippleDelete_Click" ToolTip="刪除選取片段，將同軌後續片段前移相同長度" />
+                            <MenuItem Header="分離音訊並連動" Click="ExtractAudio_Click" />
+                            <MenuItem Header="解除連動" Click="UnlinkClips_Click" />
+                        </MenuItem>
+                    </Menu>
                     <TextBlock x:Name="TrackCount" DockPanel.Dock="Right" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" />
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,18,0">
                         <TextBlock Text="縮放" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
                         <Slider x:Name="TimelineZoom" Width="100" Minimum="10" Maximum="120" Value="40" ValueChanged="TimelineZoom_Changed" VerticalAlignment="Center" ToolTip="調整時間軸水平比例；也可在軌道或時間尺上按 Ctrl＋滾輪縮放" />
                     </StackPanel>
-                </DockPanel>
+                </WrapPanel>
                 <Grid Grid.Row="1" Margin="0,8,0,0">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="{Binding TrackHeaderWidth, RelativeSource={RelativeSource AncestorType=Window}}" /><ColumnDefinition Width="8" /><ColumnDefinition /></Grid.ColumnDefinitions>
                     <TextBlock Text="軌道" Foreground="{StaticResource MutedBrush}" />
@@ -192,15 +239,16 @@
                 <ScrollViewer x:Name="TimelineTrackScroll" Grid.ColumnSpan="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="TimelineTrackScroll_Changed">
                     <ItemsControl x:Name="TrackItems">
                         <ItemsControl.ItemTemplate><DataTemplate>
-                            <Grid Margin="0,0,0,6" MinHeight="74">
+                            <Grid Margin="0,0,0,6" MinHeight="86">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="{Binding TrackHeaderWidth, RelativeSource={RelativeSource AncestorType=Window}}" /><ColumnDefinition Width="8" /><ColumnDefinition /></Grid.ColumnDefinitions>
                                 <Border Background="#253247" CornerRadius="4,0,0,4" Padding="12" Tag="{Binding Id}" MouseLeftButtonDown="TimelineTrack_MouseDown">
                                     <DockPanel><TextBlock Text="{Binding Symbol}" Foreground="#78DCCB" VerticalAlignment="Center" Margin="0,0,12,0" /><StackPanel VerticalAlignment="Center"><TextBlock Text="{Binding Name}" TextWrapping="Wrap" ToolTip="{Binding Name}" /><TextBlock Text="{Binding TrackDetail}" FontSize="11" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" /></StackPanel></DockPanel>
                                 </Border>
-                                <local:TimelineLane Grid.Column="2" MinHeight="74" Tag="{Binding Id}" Clips="{Binding Clips}" IsLocked="{Binding IsLocked}"
+                                <local:TimelineLane Grid.Column="2" MinHeight="86" Tag="{Binding Id}" Clips="{Binding Clips}" IsLocked="{Binding IsLocked}"
                                                     PixelsPerSecond="{Binding TimelinePixelsPerSecond, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     OffsetSeconds="{Binding TimelineOffsetSeconds, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     SelectedClipId="{Binding SelectedTimelineClipId, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    SelectedClipIds="{Binding SelectedTimelineClipIds, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     PlayheadSeconds="{Binding PlayheadSeconds, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     AllowDrop="True" PreviewDragEnter="TimelineLane_DragOver" PreviewDragOver="TimelineLane_DragOver"
                                                     PreviewDragLeave="TimelineLane_DragLeave" PreviewDrop="TimelineLane_Drop" MouseLeftButtonDown="TimelineLane_MouseDown"

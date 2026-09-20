@@ -14,9 +14,9 @@ public static class TimelineEditor
         var asset = project.MediaAssets.FirstOrDefault(item => item.Id == original.AssetId);
         if (sourceTrack is null || target is null || asset is null) return Reject("找不到片段來源或軌道。", out reason);
         if (sourceTrack.Locked || target.Locked) return Reject("軌道已鎖定，請先解除鎖定。", out reason);
-        if (target.Kind == TrackKind.Audio ? asset.Kind != MediaKind.Audio : asset.Kind == MediaKind.Audio)
-            return Reject("影片與圖片請放入影片軌；音訊請放入音訊軌。", out reason);
-        try { ProjectValidator.ValidateClip(replacement, asset.Duration); }
+        if (target.Kind == TrackKind.Audio ? asset.Kind == MediaKind.Image : asset.Kind == MediaKind.Audio)
+            return Reject("圖片請放入影片軌；音訊請放入音訊軌。", out reason);
+        try { ProjectValidator.ValidateClip(replacement, asset.Duration, asset.Kind == MediaKind.Image); }
         catch (ProjectValidationException error) { return Reject(error.Message, out reason); }
         if (project.Clips.Any(clip => clip.Id != replacement.Id && clip.TrackId == replacement.TrackId &&
             replacement.Start < clip.End - ProjectValidator.TimeTolerance && replacement.End > clip.Start + ProjectValidator.TimeTolerance))

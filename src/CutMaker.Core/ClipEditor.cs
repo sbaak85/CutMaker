@@ -2,66 +2,65 @@ namespace CutMaker.Core;
 
 public static class ClipEditor
 {
-    /// <summary>Moves the left edge while preserving the right edge and source/timeline synchronization.</summary>
-    public static Clip TrimStart(Clip clip, double newTimelineStart, double assetDuration)
+    /// <summary>Moves the left edge, retaining source synchronization. Fades stay attached to the new edges and shorten to fit.</summary>
+    public static Clip TrimStart(Clip clip, double newTimelineStart, double assetDuration, bool isStillImage = false)
     {
-        ProjectValidator.ValidateClip(clip, assetDuration);
+        ProjectValidator.ValidateClip(clip, assetDuration, isStillImage);
         var delta = newTimelineStart - clip.Start;
         var result = ClampFades(clip with
         {
             Start = newTimelineStart,
-            SourceIn = clip.SourceIn + delta,
+            SourceIn = isStillImage ? 0 : clip.SourceIn + delta,
             Duration = clip.Duration - delta
         });
-        ProjectValidator.ValidateClip(result, assetDuration);
+        ProjectValidator.ValidateClip(result, assetDuration, isStillImage);
         return result;
     }
 
-    /// <summary>Moves the right edge; restoring a previous trim is allowed up to the original source end.</summary>
-    public static Clip TrimEnd(Clip clip, double newTimelineEnd, double assetDuration)
+    /// <summary>Moves the right edge up to the source end; stills may extend freely. Fades stay at the new edges.</summary>
+    public static Clip TrimEnd(Clip clip, double newTimelineEnd, double assetDuration, bool isStillImage = false)
     {
-        ProjectValidator.ValidateClip(clip, assetDuration);
-        var result = ClampFades(clip with { Duration = newTimelineEnd - clip.Start });
-        ProjectValidator.ValidateClip(result, assetDuration);
+        ProjectValidator.ValidateClip(clip, assetDuration, isStillImage);
+        var result = ClampFades(clip with { Duration = newTimelineEnd - clip.Start, SourceIn = isStillImage ? 0 : clip.SourceIn });
+        ProjectValidator.ValidateClip(result, assetDuration, isStillImage);
         return result;
     }
 
     /// <summary>
-    /// Splits strictly inside the clip and outside active fade ranges. Fade boundaries are valid cut points.
-    /// Outer fades remain unchanged; interior cut edges have no fade. A cut inside a fade is rejected
-    /// until the caller removes or shortens that fade, because partial fade envelopes are not yet modeled.
+    /// Splits strictly inside the clip. Every retained video/audio envelope sample is preserved,
+    /// including cuts inside custom or overlapping fades. Source files are never changed.
     /// </summary>
-    public static (Clip Left, Clip Right) Split(Clip clip, double timelinePosition, string newRightClipId)
+    public static (Clip Left, Clip Right) Split(Clip clip, double timelinePosition, string newRightClipId, bool isStillImage = false)
     {
         ArgumentNullException.ThrowIfNull(clip);
-        ProjectValidator.ValidateClip(clip, clip.SourceEnd);
+        ProjectValidator.ValidateClip(clip, clip.SourceEnd, isStillImage);
         ProjectValidator.Require(!string.IsNullOrWhiteSpace(newRightClipId) && newRightClipId != clip.Id,
             "The right clip must have a new non-empty ID.");
         ProjectValidator.Require(double.IsFinite(timelinePosition) && timelinePosition > clip.Start && timelinePosition < clip.End,
             "The split must be strictly inside the clip.");
-        var fadeInEnd = clip.Start + (clip.FadeIn?.Duration ?? 0);
-        var fadeOutStart = clip.End - (clip.FadeOut?.Duration ?? 0);
-        ProjectValidator.Require(timelinePosition >= fadeInEnd && timelinePosition <= fadeOutStart,
-            "Cannot split inside an active Fade. Remove or shorten the Fade first, or cut at its boundary.");
         var leftDuration = timelinePosition - clip.Start;
-        var left = ClampFades(clip with { Duration = leftDuration, FadeOut = null });
-        var right = ClampFades(clip with
-        {
-            Id = newRightClipId,
-            Start = timelinePosition,
-            SourceIn = clip.SourceIn + leftDuration,
-            Duration = clip.Duration - leftDuration,
-            FadeIn = null
-        });
-        ProjectValidator.ValidateClip(left, clip.SourceEnd);
-        ProjectValidator.ValidateClip(right, clip.SourceEnd);
+        var left = Slice(clip, 0, leftDuration, clip.Id, isStillImage);
+        var right = Slice(clip, leftDuration, clip.Duration - leftDuration, newRightClipId, isStillImage);
+        ProjectValidator.ValidateClip(left, clip.SourceEnd, isStillImage);
+        ProjectValidator.ValidateClip(right, clip.SourceEnd, isStillImage);
         return (left, right);
     }
+
+    private static Clip Slice(Clip clip, double offset, double duration, string id, bool isStillImage) => clip with
+    {
+        Id = id, Start = clip.Start + offset, SourceIn = isStillImage ? 0 : clip.SourceIn + offset, Duration = duration,
+        FadeIn = FadeEnvelope.SliceIn(clip.FadeIn, offset, duration),
+        FadeOut = FadeEnvelope.SliceOut(clip.FadeOut, clip.Duration, offset, duration),
+        AudioFadeIn = FadeEnvelope.SliceIn(clip.AudioFadeIn, offset, duration),
+        AudioFadeOut = FadeEnvelope.SliceOut(clip.AudioFadeOut, clip.Duration, offset, duration)
+    };
 
     private static Clip ClampFades(Clip clip) => clip with
     {
         FadeIn = ClampFade(clip.FadeIn, clip.Duration),
-        FadeOut = ClampFade(clip.FadeOut, clip.Duration)
+        FadeOut = ClampFade(clip.FadeOut, clip.Duration),
+        AudioFadeIn = ClampFade(clip.AudioFadeIn, clip.Duration),
+        AudioFadeOut = ClampFade(clip.AudioFadeOut, clip.Duration)
     };
 
     private static FadeSettings? ClampFade(FadeSettings? fade, double duration) =>

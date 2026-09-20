@@ -23,7 +23,7 @@ internal static class EditingSmokeChecks
         {
             MediaAssets = [.. imported],
             Tracks = [new("video-1", "主要影片", TrackKind.Video), new("video-2", "疊加影片", TrackKind.Video), new("audio-1", "音訊混音", TrackKind.Audio)],
-            Clips = [new("editable", visual.Id, "video-1", 1, .5, 3)]
+            Clips = [new("editable", visual.Id, "video-1", 1, visual.Kind == MediaKind.Image ? 0 : .5, 3)]
         };
         window.LoadSmokeProject(project, path);
         window.SelectedTimelineClipId = "editable";
@@ -36,22 +36,22 @@ internal static class EditingSmokeChecks
 
         // At 40 px/sec a press six pixels inside either edge must not add a six-pixel jump.
         var headDrag = window.PlanPointerTrim(moved, true, moved.Start + .15, moved.Start + .25);
-        Near(moved.Start + .1, headDrag.Start); Near(moved.SourceIn + .1, headDrag.SourceIn); Near(moved.End, headDrag.End);
+        Near(moved.Start + .1, headDrag.Start); Near(visual.Kind == MediaKind.Image ? 0 : moved.SourceIn + .1, headDrag.SourceIn); Near(moved.End, headDrag.End);
         var tailDrag = window.PlanPointerTrim(moved, false, moved.End - .15, moved.End - .25);
         Near(moved.End - .1, tailDrag.End); Near(moved.SourceIn, tailDrag.SourceIn);
         Require(window.PlanPointerTrim(moved, true, moved.Start + .15, moved.Start + .15) == moved &&
             window.PlanPointerTrim(moved, false, moved.End - .15, moved.End - .15) == moved,
             "Stationary press inside either edge preserves exact clip bounds");
 
-        var head = ClipEditor.TrimStart(moved, 2.5, visual.Duration);
+        var head = ClipEditor.TrimStart(moved, 2.5, visual.Duration, visual.Kind == MediaKind.Image);
         Require(window.TryReplaceClip(head, "Smoke head trim"), "Head trim accepted");
-        Near(1, head.SourceIn); Near(2.5, head.Duration); Near(moved.End, head.End);
-        var tail = ClipEditor.TrimEnd(head, 4.5, visual.Duration);
+        Near(visual.Kind == MediaKind.Image ? 0 : 1, head.SourceIn); Near(2.5, head.Duration); Near(moved.End, head.End);
+        var tail = ClipEditor.TrimEnd(head, 4.5, visual.Duration, visual.Kind == MediaKind.Image);
         Require(window.TryReplaceClip(tail, "Smoke tail trim"), "Tail trim accepted");
         Near(2, tail.Duration);
 
         // Exercise the actual inspector Apply handler with numeric text and named controls.
-        SetBox(window, "ClipStartBox", "2.5"); SetBox(window, "ClipSourceInBox", "1"); SetBox(window, "ClipDurationBox", "2");
+        SetBox(window, "ClipStartBox", "2.5"); SetBox(window, "ClipSourceInBox", visual.Kind == MediaKind.Image ? "0" : "1"); SetBox(window, "ClipDurationBox", "2");
         SetBox(window, "ClipGainBox", "65"); SetBox(window, "FadeInBox", "0.25"); SetBox(window, "FadeOutBox", "0.4");
         ((ComboBox)window.FindName("FadeInCurveBox")).SelectedValue = FadeCurve.SmoothStep;
         ((ComboBox)window.FindName("FadeOutCurveBox")).SelectedValue = FadeCurve.EqualPower;
@@ -61,18 +61,47 @@ internal static class EditingSmokeChecks
         Require(effects.FadeIn == new FadeSettings(.25, FadeCurve.SmoothStep) && effects.FadeOut == new FadeSettings(.4, FadeCurve.EqualPower),
             "Inspector applies gain, fade durations and chosen curves");
 
+        SetBox(window, "FadeInBox", "1.4");
+        ((ComboBox)window.FindName("FadeInCurveBox")).SelectedValue = FadeCurve.Custom;
+        SetBox(window, "FadeInControl1Box", "0.9"); SetBox(window, "FadeInControl2Box", "0.1");
+        ((CheckBox)window.FindName("SeparateAudioFadesBox")).IsChecked = true;
+        SetBox(window, "AudioFadeInBox", "0.9"); SetBox(window, "AudioFadeOutBox", "0.8");
+        ((ComboBox)window.FindName("AudioFadeInCurveBox")).SelectedValue = FadeCurve.Custom;
+        SetBox(window, "AudioFadeInControl1Box", "0.15"); SetBox(window, "AudioFadeInControl2Box", "0.85");
+        ((ComboBox)window.FindName("VideoFadeModeBox")).SelectedValue = VideoFadeMode.Black;
+        ((Button)window.FindName("ApplyClipButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var custom = window.CurrentProject.Clips.Single();
+        Require(custom.FadeIn == new FadeSettings(1.4, FadeCurve.Custom, .9, .1) && custom.SeparateAudioFades &&
+            custom.AudioFadeIn == new FadeSettings(.9, FadeCurve.Custom, .15, .85) && custom.VideoFadeMode == VideoFadeMode.Black,
+            "Inspector applies custom controls, independent audio and black mode");
+        Require(window.SplitSelectedClip(2.6), "Split inside custom fade is accepted");
+        var customPieces = window.CurrentProject.Clips.OrderBy(clip => clip.Start).ToArray();
+        Near(FadeEnvelope.Gain(custom, .3), FadeEnvelope.Gain(customPieces[1], .2));
+        Near(FadeEnvelope.Gain(custom, .3, audio: true), FadeEnvelope.Gain(customPieces[1], .2, audio: true));
+        SetBox(window, "ClipGainBox", "55");
+        ((Button)window.FindName("ApplyClipButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var gainOnly = window.CurrentProject.Clips.Single(clip => clip.Id == customPieces[1].Id);
+        Require(gainOnly.FadeIn == customPieces[1].FadeIn && gainOnly.AudioFadeIn == customPieces[1].AudioFadeIn,
+            "Applying unrelated inspector fields preserves inherited fade ranges");
+        Near(.55, gainOnly.Gain);
+        window.UndoEdit(); window.UndoEdit(); window.UndoEdit();
+        Require(window.CurrentProject.Clips.Single() == effects, "Undo restores original shared Fade configuration");
+
         var beforeInvalid = JsonSerializer.Serialize(window.CurrentProject);
-        SetBox(window, "ClipDurationBox", "999");
+        SetBox(window, "ClipDurationBox", "-1");
         ((Button)window.FindName("ApplyClipButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Require(beforeInvalid == JsonSerializer.Serialize(window.CurrentProject), "Invalid inspector edit does not mutate project");
-        Require(!window.TryReplaceClip(effects with { TrackId = "audio-1" }, "invalid"), "Wrong-track edit rejected");
+        Require(!window.TryReplaceClip(effects with { TrackId = "missing-track" }, "invalid"), "Missing-track edit rejected");
         Require(beforeInvalid == JsonSerializer.Serialize(window.CurrentProject), "Wrong-track rejection is non-destructive");
 
-        Require(!window.SplitSelectedClip(2.6), "Split inside active fade is rejected");
+        Require(window.SplitSelectedClip(2.6), "Split inside active fade is accepted");
+        window.UndoEdit();
         Require(window.SplitSelectedClip(3.5), "Split inside clip outside fade accepted");
         var pieces = window.CurrentProject.Clips.OrderBy(clip => clip.Start).ToArray();
         Require(pieces.Length == 2, "Split creates two pieces");
-        Near(pieces[0].End, pieces[1].Start); Near(pieces[0].SourceEnd, pieces[1].SourceIn);
+        Near(pieces[0].End, pieces[1].Start);
+        if (visual.Kind == MediaKind.Image) Near(0, pieces[1].SourceIn);
+        else Near(pieces[0].SourceEnd, pieces[1].SourceIn);
         Near(effects.Duration, pieces.Sum(clip => clip.Duration));
         Require(pieces[0].FadeOut is null && pieces[1].FadeIn is null, "Split removes inner fades only");
         window.UndoEdit(); Require(window.CurrentProject.Clips.Single() == effects, "Undo split returns original gain and fades");
@@ -117,7 +146,7 @@ internal static class EditingSmokeChecks
         foreach (var (source, fingerprint) in hashes) Require(Hash(source) == fingerprint, "Editing leaves source bytes untouched");
         File.WriteAllText(report, new StringBuilder()
             .AppendLine("PASS: cross-track move; head/tail source-preserving trims without pointer-grab jumps; inspector gain/fade durations/curves; invalid-edit rejection;")
-            .AppendLine("split continuity and fade restrictions; delete; exact Undo/Redo of clips and tracks; redo invalidation; locked track rejection;")
+            .AppendLine("custom curve controls; independent audio/black mode; split envelope continuity and inspector retention; delete; exact Undo/Redo of clips and tracks; redo invalidation; locked track rejection;")
             .AppendLine("track gain/mute; edited project save/reopen; history reset on project switch; all imported source hashes unchanged.").ToString());
     }
 

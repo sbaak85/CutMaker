@@ -60,10 +60,10 @@ using (var meta = JsonDocument.Parse(await MediaRenderService.RunToolAsync(ffpro
     Check(streams.Length == 1 && streams[0].GetProperty("codec_name").GetString() == "mp3", "MP3 output contains audio only");
     Check(Math.Abs(double.Parse(meta.RootElement.GetProperty("format").GetProperty("duration").GetString()!, CultureInfo.InvariantCulture) - 2.6) < 0.1, "MP3 duration matches timeline within encoder padding");
 }
-async Task<byte[]> Pixel(double time)
+async Task<byte[]> Pixel(double time, string? source = null)
 {
     var raw = Path.Combine(folder, "pixel.rgb");
-    await Run("-ss", time.ToString(CultureInfo.InvariantCulture), "-i", mp4, "-frames:v", "1", "-vf", "crop=2:2:80:44", "-pix_fmt", "rgb24", "-f", "rawvideo", raw);
+    await Run("-ss", time.ToString(CultureInfo.InvariantCulture), "-i", source ?? mp4, "-frames:v", "1", "-vf", "crop=2:2:iw/2:ih/2", "-pix_fmt", "rgb24", "-f", "rawvideo", raw);
     return File.ReadAllBytes(raw);
 }
 var blue = await Pixel(0.1);
@@ -102,7 +102,7 @@ await Run("-f", "lavfi", "-i", "color=yellow:s=160x90", "-frames:v", "1", stillP
 var stillProject = new CutProject
 {
     Title = "Still image", Video = new(160, 90, 30), MediaAssets = [new("still", stillPath, MediaKind.Image, 5)],
-    Tracks = [new("video", "Video", TrackKind.Video)], Clips = [new("still", "still", "video", 0, 1, 0.5)]
+    Tracks = [new("video", "Video", TrackKind.Video)], Clips = [new("still", "still", "video", 0, 0, 0.5)]
 };
 var stillOutput = Path.Combine(folder, "still.mp4");
 await MediaRenderService.RenderAsync(stillProject, null, stillOutput);
@@ -127,6 +127,55 @@ for (var i = 0; i < curves.Length; i++)
 var oldOutput = Path.Combine(folder, "existing.mp4");
 var sentinel = "existing output must survive"u8.ToArray();
 File.WriteAllBytes(oldOutput, sentinel);
+var rangePath = Path.Combine(folder, "range.mp4");
+var rangeResult = await MediaRenderService.RenderAsync(project, projectPath, rangePath,
+    new(Width: 108, Height: 192, Fps: 24, VideoQuality: ExportVideoQuality.High, AudioBitrateKbps: 256, OutputStart: 0.6, OutputEnd: 1.6));
+Check(Math.Abs(rangeResult.Duration - 1) < 1e-9 && project.Video == new VideoSettings(160, 90, 30), "range export reports exact selected duration without changing the source project");
+using (var meta = JsonDocument.Parse(await MediaRenderService.RunToolAsync(ffprobe, ["-v", "error", "-show_streams", "-show_format", "-of", "json", rangePath], CancellationToken.None)))
+{
+    var video = meta.RootElement.GetProperty("streams").EnumerateArray().First(stream => stream.GetProperty("codec_type").GetString() == "video");
+    Check(video.GetProperty("width").GetInt32() == 108 && video.GetProperty("height").GetInt32() == 192 && video.GetProperty("r_frame_rate").GetString() == "24/1", "portrait dimensions and selected frame rate reach the MP4 encoder");
+    Check(Math.Abs(double.Parse(meta.RootElement.GetProperty("format").GetProperty("duration").GetString()!, CultureInfo.InvariantCulture) - 1) < .05, "range output contains one second instead of the full timeline");
+}
+var rangeFirst = await Pixel(0, rangePath);
+Check(Math.Abs(rangeFirst[1] - fade[1]) < 15 && Math.Abs(rangeFirst[2] - fade[2]) < 15, "range start preserves source trim, layer order and in-progress fade instead of restarting it");
+var rangeAudio = await DecodeAudio(rangePath);
+Check(Amplitude(rangeAudio, .4, .1, 880) is > .06 and < .12, "range audio is shifted to local output time with its original gain");
+var highBitratePath = Path.Combine(folder, "range-320.mp3");
+await MediaRenderService.RenderAsync(project, projectPath, highBitratePath, new(AudioBitrateKbps: 320, OutputStart: .4, OutputEnd: 1.4));
+using (var meta = JsonDocument.Parse(await MediaRenderService.RunToolAsync(ffprobe, ["-v", "error", "-show_streams", "-of", "json", highBitratePath], CancellationToken.None)))
+    Check(meta.RootElement.GetProperty("streams")[0].GetProperty("bit_rate").GetString() == "320000", "MP3 uses the chosen 320 kbps bitrate");
+var framePath = Path.Combine(folder, "seek-frame.png");
+await MediaRenderService.RenderAsync(project, projectPath, framePath, new(Preview: true, Width: 160, Height: 90, OutputStart: .6, OutputEnd: .7, FrameOnly: true));
+var framePixel = await Pixel(0, framePath);
+Check(Math.Abs(framePixel[1] - fade[1]) < 10 && Math.Abs(framePixel[2] - fade[2]) < 10, "single-frame seek renders current multitrack composition and fade without encoding the whole project");
+var blackPath = Path.Combine(folder, "fade-black.mp4");
+var blackProject = project with { Clips = project.Clips.Select(clip => clip.Id == "upper" ? clip with
+    { VideoFadeMode = VideoFadeMode.Black, SeparateAudioFades = true, AudioFadeIn = null, AudioFadeOut = null } : clip).ToList() };
+await MediaRenderService.RenderAsync(blackProject, projectPath, blackPath);
+var blackFade = await Pixel(.6, blackPath);
+Check(blackFade[1] is > 15 and < 55 && blackFade[2] < 15, "independent fade-to-black darkens foreground without revealing the lower blue track");
+var blackAudio = await DecodeAudio(blackPath);
+Check(Amplitude(blackAudio, .5, .05, 440) > .05, "separate audio envelope can keep sound unchanged during the visual fade");
+var detachedPath = Path.Combine(folder, "detached-audio.mp3");
+await MediaRenderService.RenderAsync(project with { Clips = project.Clips.Select(clip => clip.Id == "upper" ? clip with { SourceAudioMuted = true, Gain = 4 } : clip).ToList() }, projectPath, detachedPath);
+var detachedAudio = await DecodeAudio(detachedPath);
+Check(Amplitude(detachedAudio, 1, .1, 440) < .003 && Amplitude(detachedAudio, 1, .1, 880) > .065,
+    "muted source audio stays silent after video gain changes while independent audio remains audible");
+var customClip = new Clip("custom", "tone", "audio", 0, 0, 2, FadeIn: new(1, FadeCurve.Custom, .1, .4), FadeOut: new(.5, FadeCurve.Custom, .8, .9));
+var (customLeft, customRight) = ClipEditor.Split(customClip, .3, "custom-right");
+var customProject = new CutProject { MediaAssets = [new("tone", tonePath, MediaKind.Audio, 2)], Tracks = [new("audio", "Audio", TrackKind.Audio)], Clips = [customLeft, customRight] };
+var customPath = Path.Combine(folder, "custom-split.mp3");
+await MediaRenderService.RenderAsync(customProject, null, customPath);
+var customPcm = await DecodeAudio(customPath);
+Check(Math.Abs(Amplitude(customPcm, .54, .02, 880) - .3 * FadeEnvelope.Gain(customClip, .55, true)) < .015,
+    "custom Bezier envelope survives a razor cut inside the fade and renders the preserved curve interval");
+foreach (var invalid in new[] { new MediaRenderOptions(OutputStart: 1, OutputEnd: 1), new MediaRenderOptions(OutputStart: -.1), new MediaRenderOptions(OutputEnd: 3), new MediaRenderOptions(AudioBitrateKbps: 17) })
+{
+    try { await MediaRenderService.RenderAsync(project, projectPath, oldOutput, invalid); throw new Exception("Expected invalid output settings rejection"); }
+    catch (InvalidOperationException error) when (error.Message.Contains("區間") || error.Message.Contains("位元率")) { }
+}
+Check(File.ReadAllBytes(oldOutput).SequenceEqual(sentinel), "invalid ranges and bitrate fail before replacing any existing destination");
 var missing = project with { MediaAssets = project.MediaAssets.Select(asset => asset.Id == "blue" ? asset with { Path = "missing.mp4" } : asset).ToList() };
 try { await MediaRenderService.RenderAsync(missing, projectPath, oldOutput); throw new Exception("Expected missing input rejection"); }
 catch (FileNotFoundException) { }

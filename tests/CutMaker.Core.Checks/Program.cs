@@ -7,7 +7,11 @@ var checks = new (string Name, Action Run)[]
     ("Trim tail can restore source and clamps fades", TrimTail),
     ("Invalid trim and split boundaries are rejected", InvalidEdits),
     ("Split keeps source continuity and total duration", SplitContinuity),
-    ("Split rejects active fades and permits exact fade boundaries", SplitFadeBoundaries),
+    ("Split preserves exact fade envelopes inside fades and at their boundaries", SplitFadeBoundaries),
+    ("Custom and independent audio fades retain all samples through repeated splits", CustomFadeSplits),
+    ("Invalid custom controls and ranges are rejected", InvalidFadeControls),
+    ("Existing schema-one fades load with compatible defaults", LegacyFadeDefaults),
+    ("Images extend and split without advancing source time", ImageEdits),
     ("Project references, finite numbers and fade limits are validated", InvalidProjects),
     ("Save/load round trip, replacement and relative paths", SaveLoad),
     ("Malformed, missing and unsupported schemas are rejected", InvalidFiles),
@@ -21,7 +25,8 @@ var checks = new (string Name, Action Run)[]
     ("Repeated source placements keep independent IDs and survive save/load", PlacementRoundTrip),
     ("Timeline positions round to frames without changing source durations", PlacementFrames),
     ("Moving clips preserves source timing and enforces source/target locks", EditingMoves),
-    ("Trim and inspector edits reject overlap and invalid source/fade/gain ranges", EditingBounds)
+    ("Trim and inspector edits reject overlap and invalid source/fade/gain ranges", EditingBounds),
+    ("Recovery snapshots preserve sources, isolate sessions and survive cancellation", RecoveryChecks.Run)
 };
 var failures = 0;
 foreach (var (name, run) in checks)
@@ -89,19 +94,7 @@ static void SplitContinuity()
 static void SplitFadeBoundaries()
 {
     var original = SampleClip();
-    foreach (var position in new[] { 11.0, 20.0 })
-    {
-        try
-        {
-            ClipEditor.Split(original, position, "clip-2");
-            throw new Exception("Expected a cut inside Fade to be rejected.");
-        }
-        catch (ProjectValidationException error)
-        {
-            True(error.Message.Contains("Fade") && error.Message.Contains("Remove or shorten"),
-                "Rejected Fade cut must explain how to proceed");
-        }
-    }
+    foreach (var position in new[] { 11.0, 20.0 }) CheckSplitEnvelope(original, position);
 
     foreach (var position in new[] { original.Start + original.FadeIn!.Duration, original.End - original.FadeOut!.Duration })
     {
@@ -115,11 +108,99 @@ static void SplitFadeBoundaries()
     var touching = ClipEditor.Split(touchingFades, 16, "clip-2");
     Near(6, touching.Left.FadeIn!.Duration); Near(6, touching.Right.FadeOut!.Duration);
     var overlappingFades = original with { FadeIn = new FadeSettings(7), FadeOut = new FadeSettings(7) };
-    Throws<ProjectValidationException>(() => ClipEditor.Split(overlappingFades, 16, "clip-2"));
+    CheckSplitEnvelope(overlappingFades, 16);
     var zeroFades = original with { FadeIn = new FadeSettings(), FadeOut = new FadeSettings() };
     ClipEditor.Split(zeroFades, 10.5, "clip-2");
     True(original.FadeIn!.Duration == 2 && original.FadeOut!.Duration == 3 && original.Duration == 12,
-        "Rejected edits do not mutate the source record");
+        "Split planning does not mutate the source record");
+}
+
+static void CheckSplitEnvelope(Clip original, double position)
+{
+    var (left, right) = ClipEditor.Split(original, position, original.Id + "-split");
+    Near(original.SourceIn, left.SourceIn); Near(left.SourceEnd, right.SourceIn); Near(right.SourceEnd, original.SourceEnd);
+    ProjectValidator.Validate(SampleProject() with { Clips = [left, right] });
+    for (var index = 0; index <= 400; index++)
+    {
+        var time = original.Duration * index / 400;
+        var piece = time < left.Duration ? left : right;
+        var offset = time < left.Duration ? 0 : left.Duration;
+        Near(FadeEnvelope.Gain(original, time), FadeEnvelope.Gain(piece, time - offset));
+        Near(FadeEnvelope.Gain(original, time, audio: true), FadeEnvelope.Gain(piece, time - offset, audio: true));
+    }
+}
+
+static void CustomFadeSplits()
+{
+    foreach (var curve in Enum.GetValues<FadeCurve>())
+    {
+        var original = SampleClip() with
+        {
+            FadeIn = new(10, curve, .92, .15), FadeOut = new(8, curve, .2, .8),
+            SeparateAudioFades = true, AudioFadeIn = new(9, FadeCurve.Custom, .13, .91),
+            AudioFadeOut = new(11, FadeCurve.EqualPower), VideoFadeMode = VideoFadeMode.Black
+        };
+        foreach (var offset in new[] { .001, 1.2, 4.5, 6.0, 10.5, 11.999 })
+            CheckSplitEnvelope(original, original.Start + offset);
+        var first = ClipEditor.Split(original, original.Start + 2, "second");
+        CheckSplitEnvelope(first.Right, first.Right.Start + .75);
+        var second = ClipEditor.Split(first.Right, first.Right.Start + .75, "third");
+        Near(FadeEnvelope.Gain(original, 2.9), FadeEnvelope.Gain(second.Right, .15));
+        True(first.Right.VideoFadeMode == VideoFadeMode.Black && first.Right.SeparateAudioFades, "Split retains mode and independent audio");
+    }
+    var custom = new FadeSettings(1, FadeCurve.Custom, .9, .1);
+    Near(0, FadeEnvelope.CurveValue(custom, 0)); Near(1, FadeEnvelope.CurveValue(custom, 1));
+    Near(.409375, FadeEnvelope.CurveValue(custom, .25));
+    var distinct = SampleClip() with { SeparateAudioFades = true, AudioFadeIn = null, AudioFadeOut = null };
+    Near(1, FadeEnvelope.Gain(distinct, 0, audio: true)); Near(0, FadeEnvelope.Gain(distinct, 0));
+}
+
+static void InvalidFadeControls()
+{
+    var project = SampleProject();
+    foreach (var fade in new[]
+    {
+        new FadeSettings(1, FadeCurve.Custom, double.NaN), new FadeSettings(1, Control1: -.01),
+        new FadeSettings(1, Control2: 1.01), new FadeSettings(1, RangeStart: .8, RangeEnd: .2),
+        new FadeSettings(1, RangeStart: -1), new FadeSettings(1, RangeEnd: double.PositiveInfinity)
+    }) Throws<ProjectValidationException>(() => ProjectValidator.Validate(project with { Clips = [SampleClip() with { AudioFadeIn = fade }] }));
+    Throws<ProjectValidationException>(() => ProjectValidator.Validate(project with { Clips = [SampleClip() with { VideoFadeMode = (VideoFadeMode)99 }] }));
+}
+
+static void LegacyFadeDefaults() => InTempFolder(folder =>
+{
+    var path = Path.Combine(folder, "old.cutmaker");
+    File.WriteAllText(path, """
+        {"schemaVersion":1,"title":"Old project","mediaAssets":[{"id":"asset-1","path":"x.mp4","kind":"video","duration":20}],
+        "tracks":[{"id":"video-1","name":"Video","kind":"video"}],
+        "clips":[{"id":"clip-1","assetId":"asset-1","trackId":"video-1","start":0,"sourceIn":0,"duration":10,
+        "fadeIn":{"duration":2,"curve":"easeIn"},"fadeOut":{"duration":3,"curve":"linear"}}]}
+        """);
+    var clip = ProjectStore.Load(path).Clips[0];
+    True(!clip.SeparateAudioFades && clip.VideoFadeMode == VideoFadeMode.Opacity && clip.LinkGroupId is null, "Legacy mode defaults");
+    Near(1.0 / 3, clip.FadeIn!.Control1); Near(2.0 / 3, clip.FadeIn.Control2);
+    Near(0, clip.FadeIn.RangeStart); Near(1, clip.FadeIn.RangeEnd);
+    Near(.25, FadeEnvelope.Gain(clip, 1)); Near(.25, FadeEnvelope.Gain(clip, 1, audio: true));
+    var pieces = ClipEditor.Split(clip, 1, "right");
+    var project = ProjectStore.Load(path) with { Clips = [pieces.Left, pieces.Right] };
+    ProjectStore.Save(path, project);
+    True(ProjectStore.Load(path).Clips.SequenceEqual(project.Clips), "Custom segment fields survive save and reopen");
+});
+
+static void ImageEdits()
+{
+    var project = CutProject.CreateEmpty() with { MediaAssets = [new("still", "image.png", MediaKind.Image, 5)], Clips = [new("image", "still", "video-1", 3, 0, 5)] };
+    var longer = ClipEditor.TrimEnd(project.Clips[0], 123, 5, isStillImage: true);
+    Near(120, longer.Duration); Near(0, longer.SourceIn);
+    True(TimelineEditor.CanReplace(project, longer, out _), "Still source duration is a default, not a hard bound");
+    var trimmed = ClipEditor.TrimStart(longer, 4, 5, isStillImage: true);
+    Near(0, trimmed.SourceIn);
+    var split = ClipEditor.Split(trimmed, 10, "image-right", isStillImage: true);
+    Near(0, split.Left.SourceIn); Near(0, split.Right.SourceIn);
+    ProjectValidator.Validate(project with { Clips = [split.Left, split.Right] });
+    var legacy = project.Clips[0] with { SourceIn = 1, Duration = 4 };
+    ProjectValidator.Validate(project with { Clips = [legacy] });
+    Near(0, ClipEditor.TrimEnd(legacy, legacy.End + 1, 5, isStillImage: true).SourceIn);
 }
 
 static void InvalidProjects()
@@ -381,7 +462,7 @@ static void EditingMoves()
         moved.FadeOut == original.FadeOut && moved.Gain == original.Gain, "Move preserves source and effects");
     True(project.Clips[0] == original, "Move planning is pure");
     True(TimelineEditor.CanReplace(project, original, out _), "Unchanged clip does not overlap itself");
-    Throws<ProjectValidationException>(() => TimelineEditor.Move(project, original.Id, "audio-1", 0));
+    True(TimelineEditor.Move(project, original.Id, "audio-1", 0).TrackId == "audio-1", "Video source may supply an extracted audio track");
     Throws<ProjectValidationException>(() => TimelineEditor.Move(project, original.Id, "missing", 0));
     Throws<ProjectValidationException>(() => TimelineEditor.Move(project, original.Id, "video-2", -1));
     project.Tracks[0] = project.Tracks[0] with { Locked = true };

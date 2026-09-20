@@ -15,6 +15,7 @@ public partial class MainWindow
     {
         if (_exportCancellation is not null) return;
         if (_project.Clips.Count == 0) { StatusText.Text = "請先把素材放入時間軸，再匯出。"; return; }
+        if (!ShowOutputSettings(true)) return;
         var name = string.Concat(_project.Title.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
         var dialog = new SaveFileDialog
         {
@@ -25,6 +26,7 @@ public partial class MainWindow
         var snapshot = _project with { MediaAssets = [.. _project.MediaAssets], Tracks = [.. _project.Tracks], Clips = [.. _project.Clips] };
         var projectPath = _projectPath;
         var generation = _exportContextGeneration;
+        var options = CurrentExportOptions();
         using var cancellation = new CancellationTokenSource();
         _exportCancellation = cancellation;
         ExportButton.IsEnabled = false;
@@ -39,7 +41,7 @@ public partial class MainWindow
                 RenderProgressBar.Value = update.Fraction * 100;
                 StatusText.Text = $"{update.Message} {update.Fraction:P0} · 使用開始匯出時的剪輯內容";
             });
-            var result = await MediaRenderService.RenderAsync(snapshot, projectPath, dialog.FileName, progress: progress,
+            var result = await MediaRenderService.RenderAsync(snapshot, projectPath, dialog.FileName, options, progress: progress,
                 cancellationToken: cancellation.Token);
             if (generation == _exportContextGeneration) StatusText.Text = $"已匯出 {result.Duration:0.##} 秒 · {result.OutputPath}";
         }

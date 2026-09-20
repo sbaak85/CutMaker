@@ -41,6 +41,8 @@ public partial class MainWindow : Window
         PreviewMouseLeftButtonDown += (_, _) => ResetLibraryDragCandidate();
         PreviewMouseLeftButtonUp += (_, _) => ResetLibraryDragCandidate();
         Deactivated += (_, _) => ResetLibraryDragCandidate();
+        InitializeRecovery();
+        InitializeMediaVisuals();
     }
 
     private static CutProject CreateProject() => CutProject.CreateEmpty("未命名專案") with
@@ -135,6 +137,7 @@ public partial class MainWindow : Window
             _project = saved;
             _projectPath = target;
             _dirty = false;
+            RecoveryProjectSaved();
             RefreshProject();
             StatusText.Text = "專案已儲存";
             return true;
@@ -142,7 +145,7 @@ public partial class MainWindow : Window
         catch (Exception ex) when (IsProjectError(ex)) { ShowError("無法儲存專案", ex); return false; }
     }
 
-    private static bool IsProjectError(Exception ex) => ex is IOException or UnauthorizedAccessException or
+    private static bool IsProjectError(Exception ex) => ex is IOException or InvalidDataException or UnauthorizedAccessException or
         JsonException or ProjectValidationException or NotSupportedException or ArgumentException;
     private void ShowError(string title, Exception ex) => MessageBox.Show(this, ex.Message, title, MessageBoxButton.OK, MessageBoxImage.Error);
 
@@ -177,6 +180,19 @@ public partial class MainWindow : Window
 
     private void HandleShortcut(object sender, KeyEventArgs e)
     {
+        if (Keyboard.Modifiers == ModifierKeys.Control && Keyboard.FocusedElement is TimelineLane)
+        {
+            switch (e.Key)
+            {
+                case Key.A: SelectAllClips_Click(this, e); break;
+                case Key.C: CopySelectedClips(); break;
+                case Key.V: PasteClips(PlayheadSeconds); break;
+                case Key.D: DuplicateClips_Click(this, e); break;
+                default: goto StandardShortcuts;
+            }
+            e.Handled = true; return;
+        }
+        StandardShortcuts:
         if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.None &&
             Keyboard.FocusedElement is not TextBox and not ButtonBase and not ComboBox)
         {
@@ -227,6 +243,11 @@ public partial class MainWindow : Window
             var client = (FrameworkElement)VisualTreeHelper.GetParent(RootLayout);
             var availableWidth = Math.Max(0, client.ActualWidth - RootLayout.Margin.Left - RootLayout.Margin.Right);
             var availableHeight = Math.Max(0, client.ActualHeight - RootLayout.Margin.Top - RootLayout.Margin.Bottom);
+            var compactHeight = availableHeight < 540;
+            var headerHeight = compactHeight ? 34 : 58;
+            RootLayout.RowDefinitions[0].Height = new GridLength(headerHeight);
+            foreach (var button in ProjectToolbar.Children.OfType<Button>())
+                button.Padding = compactHeight ? new Thickness(8, 5, 8, 5) : new Thickness(14, 8, 14, 8);
             var panelSpace = Math.Max(0, availableWidth - 16);
             LibraryColumn.MinWidth = Math.Min(280, panelSpace * 0.34);
             InspectorColumn.MinWidth = Math.Min(250, panelSpace * 0.30);
@@ -250,10 +271,10 @@ public partial class MainWindow : Window
             InspectorColumn.Width = new(Math.Max(inspectorMin, inspector));
             PreviewColumn.Width = new(1, GridUnitType.Star);
             var toolbarHeight = Math.Max(44, ProjectToolbar.ActualHeight);
-            var verticalSpace = Math.Max(0, availableHeight - 58 - toolbarHeight - 8 - 32);
-            WorkspaceRow.MinHeight = Math.Min(220, verticalSpace * 0.54);
+            var verticalSpace = Math.Max(0, availableHeight - headerHeight - toolbarHeight - 8 - 32);
+            WorkspaceRow.MinHeight = Math.Min(compactHeight ? 220 : 280, verticalSpace * 0.64);
             TimelineRow.MinHeight = Math.Min(190, verticalSpace - WorkspaceRow.MinHeight);
-            var maxTimeline = availableHeight - 58 - toolbarHeight - 8 - 32 - WorkspaceRow.MinHeight;
+            var maxTimeline = availableHeight - headerHeight - toolbarHeight - 8 - 32 - WorkspaceRow.MinHeight;
             TimelineRow.Height = new(LayoutSettings.Bounded(TimelineRow.Height.IsAbsolute ? TimelineRow.Height.Value : TimelineRow.ActualHeight, TimelineRow.MinHeight, maxTimeline, 310));
             WorkspaceRow.Height = new(1, GridUnitType.Star);
             TrackHeaderWidth = LayoutSettings.Bounded(TrackHeaderColumn.Width.IsAbsolute ? TrackHeaderColumn.Width.Value : TrackHeaderColumn.ActualWidth, 180, availableWidth - 28 - 288, 250);
@@ -286,6 +307,8 @@ public partial class MainWindow : Window
         if (!MayDiscard()) { e.Cancel = true; return; }
         ResetProjectImport();
         ShutdownPreview();
+        ShutdownRecovery();
+        ShutdownMediaVisuals();
         SaveLayout();
     }
 
@@ -310,5 +333,9 @@ public partial class MainWindow : Window
         var rows = RootLayout.RowDefinitions.Sum(row => row.ActualHeight);
         if (rows > RootLayout.ActualHeight + 1) throw new InvalidOperationException("Workspace rows overflow.");
         if (AssetNameColumn.ActualWidth < 219 || TrackHeaderWidth < 179) throw new InvalidOperationException("Name columns are too narrow.");
+        if (AssetGrid.Items.Count > 0 && AssetGrid.ActualHeight < 64)
+            throw new InvalidOperationException("The media list must retain room for its header and at least one visible row.");
+        if (TrackItems.Items.Count > 0 && TimelineTrackScroll.ViewportHeight < 25)
+            throw new InvalidOperationException("The timeline must retain visible space for scrolling tracks.");
     }
 }

@@ -31,7 +31,9 @@ public partial class MainWindow
 
     private void RefreshTimeline()
     {
+        var focusedTrack = (Keyboard.FocusedElement as TimelineLane)?.Tag as string;
         if (SelectedTimelineClipId is not null && !_project.Clips.Any(clip => clip.Id == SelectedTimelineClipId)) SelectedTimelineClipId = null;
+        NormalizeClipSelection();
         var assets = _project.MediaAssets.ToDictionary(asset => asset.Id);
         TrackItems.ItemsSource = _project.Tracks.Select(track => new
         {
@@ -39,13 +41,20 @@ public partial class MainWindow
             TrackDetail = $"{(track.Muted ? "靜音" : $"音量 {track.Volume * 100:0}%")}{(track.Locked ? " · 鎖定" : "")}",
             Symbol = track.Kind == TrackKind.Video ? "V" : "A",
             Clips = (IReadOnlyList<TimelineClipView>)_project.Clips.Where(clip => clip.TrackId == track.Id).OrderBy(clip => clip.Start)
-                .Select(clip => new TimelineClipView(clip.Id, Path.GetFileName(assets[clip.AssetId].Path), assets[clip.AssetId].Kind, clip.Start, clip.Duration,
-                    clip.FadeIn?.Duration ?? 0, clip.FadeOut?.Duration ?? 0)).ToArray()
+                .Select(clip => new TimelineClipView(clip.Id, (clip.LinkGroupId is null ? "" : "↔ ") + Path.GetFileName(assets[clip.AssetId].Path), track.Kind == TrackKind.Audio ? MediaKind.Audio : assets[clip.AssetId].Kind, clip.Start, clip.Duration,
+                    clip.FadeIn?.Duration ?? 0, clip.FadeOut?.Duration ?? 0, GetMediaVisuals(clip.AssetId)?.Thumbnail, GetMediaVisuals(clip.AssetId)?.Waveform,
+                    clip.SourceIn, assets[clip.AssetId].Duration)).ToArray()
         }).ToArray();
         TrackCount.Text = $"{_project.Tracks.Count} 條軌道 · {_project.Clips.Count} 個片段";
         RemoveClipButton.IsEnabled = SelectedTimelineClipId is not null;
         RefreshSelectionInspector();
         UpdateTimelineViewport();
+        RefreshMediaVisuals();
+        if (focusedTrack is not null)
+        {
+            TrackItems.UpdateLayout();
+            FindLanes(TrackItems).FirstOrDefault(lane => (string)lane.Tag == focusedTrack)?.Focus();
+        }
     }
 
     private void TimelineZoom_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -241,13 +250,13 @@ public partial class MainWindow
         var time = TimelineOffsetSeconds + point.X / TimelinePixelsPerSecond;
         var selected = _project.Clips.LastOrDefault(clip => clip.TrackId == (string)lane.Tag && clip.Start <= time && time < clip.End);
         _selectedTrackId = (string)lane.Tag;
-        SelectedTimelineClipId = selected?.Id;
-        RemoveClipButton.IsEnabled = selected is not null;
+        SelectClipClick(selected?.Id, Keyboard.Modifiers.HasFlag(ModifierKeys.Control));
+        RemoveClipButton.IsEnabled = SelectedTimelineClipId is not null;
         RefreshSelectionInspector();
         Keyboard.Focus(lane);
-        if (selected is not null)
+        if (selected is not null && SelectionIds().Contains(selected.Id) && !Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
         {
-            StatusText.Text = "已選取片段 · 中央移動、兩端修剪、上緣金色方塊調整 Fade · Delete 移除";
+            StatusText.Text = $"已選取 {SelectionIds().Count} 個片段 · Ctrl+點選多選 · 拖曳中央移動、兩端修剪";
             BeginPointerEdit(lane, selected, point);
         }
         SeekPreview(Math.Max(0, time));
@@ -257,13 +266,7 @@ public partial class MainWindow
     private void RemoveClip_Click(object sender, RoutedEventArgs e) => RemoveSelectedClip();
     internal void RemoveSelectedClip()
     {
-        var clip = _project.Clips.FirstOrDefault(candidate => candidate.Id == SelectedTimelineClipId);
-        if (clip is null) return;
-        if (_project.Tracks.Any(track => track.Id == clip.TrackId && track.Locked)) { StatusText.Text = "軌道已鎖定，無法移除片段"; return; }
-        RecordUndo();
-        _project.Clips.Remove(clip);
-        SelectedTimelineClipId = null;
-        FinishEdit("片段已從軌道移除，素材庫與來源檔案均保留");
+        DeleteSelectedClips(false);
     }
 
     private static IEnumerable<TimelineLane> FindLanes(DependencyObject parent)

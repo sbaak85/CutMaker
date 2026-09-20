@@ -6,7 +6,8 @@ using CutMaker.Core;
 
 namespace CutMaker.App;
 
-public sealed record TimelineClipView(string Id, string Name, MediaKind Kind, double Start, double Duration, double FadeIn = 0, double FadeOut = 0);
+public sealed record TimelineClipView(string Id, string Name, MediaKind Kind, double Start, double Duration, double FadeIn = 0, double FadeOut = 0,
+    ImageSource? Thumbnail = null, ImageSource? Waveform = null, double SourceIn = 0, double SourceDuration = 0);
 
 /// <summary>A viewport-sized, retained-data lane. Drawing never changes clip timing or source media.</summary>
 public sealed class TimelineLane : FrameworkElement
@@ -26,6 +27,9 @@ public sealed class TimelineLane : FrameworkElement
     public static readonly DependencyProperty IsLockedProperty = DependencyProperty.Register(
         nameof(IsLocked), typeof(bool), typeof(TimelineLane),
         new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsRender));
+    public static readonly DependencyProperty SelectedClipIdsProperty = DependencyProperty.Register(
+        nameof(SelectedClipIds), typeof(IReadOnlyList<string>), typeof(TimelineLane),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
     public static readonly DependencyProperty PlayheadSecondsProperty = DependencyProperty.Register(
         nameof(PlayheadSeconds), typeof(double), typeof(TimelineLane),
         new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender), TimelineDrawing.IsNonnegativeFinite);
@@ -81,6 +85,8 @@ public sealed class TimelineLane : FrameworkElement
         get => (bool)GetValue(IsLockedProperty);
         set => SetValue(IsLockedProperty, value);
     }
+    public IReadOnlyList<string>? SelectedClipIds
+    { get => (IReadOnlyList<string>?)GetValue(SelectedClipIdsProperty); set => SetValue(SelectedClipIdsProperty, value); }
     public double PlayheadSeconds { get => (double)GetValue(PlayheadSecondsProperty); set => SetValue(PlayheadSecondsProperty, value); }
 
     public void SetDropPreview(double? start, double duration, bool allowed)
@@ -135,10 +141,25 @@ public sealed class TimelineLane : FrameworkElement
         if (!TryGetVisibleRect(clip.Start, clip.Duration, out var rect)) return;
         var fill = clip.Kind switch { MediaKind.Audio => AudioBrush, MediaKind.Image => ImageBrush, _ => VideoBrush };
         var outline = clip.Kind switch { MediaKind.Audio => AudioPen, MediaKind.Image => ImagePen, _ => VideoPen };
-        drawing.DrawRoundedRectangle(fill, clip.Id == SelectedClipId ? SelectionPen : outline, rect, 4, 4);
+        drawing.DrawRoundedRectangle(fill, clip.Id == SelectedClipId || SelectedClipIds?.Contains(clip.Id) == true ? SelectionPen : outline, rect, 4, 4);
         // Thin edge grips make the two trim targets discoverable. Fade ranges remain visible when selected.
         var actualLeft = (clip.Start - OffsetSeconds) * PixelsPerSecond;
         var actualRight = (clip.Start + clip.Duration - OffsetSeconds) * PixelsPerSecond;
+        if (rect.Width > 26 && rect.Height > 50)
+        {
+            var visualRect = new Rect(rect.Left + 7, rect.Top + 42, Math.Max(1, rect.Width - 14), Math.Max(1, rect.Height - 46));
+            drawing.PushClip(new RectangleGeometry(visualRect));
+            if (clip.Waveform is not null && clip.SourceDuration > 0)
+            {
+                // The cached waveform spans the source. Use source coordinates so trimmed clips stay aligned.
+                var sourceWidth = clip.SourceDuration * PixelsPerSecond;
+                drawing.DrawImage(clip.Waveform, new Rect(actualLeft - clip.SourceIn * PixelsPerSecond,
+                    visualRect.Top, sourceWidth, visualRect.Height));
+            }
+            if (clip.Thumbnail is not null && clip.Kind != MediaKind.Audio)
+                drawing.DrawImage(clip.Thumbnail, new Rect(visualRect.Left, visualRect.Top, Math.Min(visualRect.Width, visualRect.Height * 16 / 9), visualRect.Height));
+            drawing.Pop();
+        }
         if (clip.Id == SelectedClipId && rect.Width >= 18)
         {
             if (actualLeft >= 0) drawing.DrawLine(SelectionPen, new Point(actualLeft + 4, rect.Top + 9), new Point(actualLeft + 4, rect.Bottom - 9));

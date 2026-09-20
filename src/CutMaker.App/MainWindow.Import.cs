@@ -123,7 +123,7 @@ public partial class MainWindow
                     RefreshAssets();
                     UpdateTitle();
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or
+                catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or NotSupportedException or
                     ArgumentException or InvalidOperationException or COMException or TimeoutException or FormatException)
                 {
                     problems.Add(new(candidate.FullPath, ex is TimeoutException ? "讀取超過 15 秒，已略過" : ex.Message));
@@ -176,6 +176,11 @@ public partial class MainWindow
 
     private void ResetProjectImport()
     {
+        RecoveryProjectChanging();
+        ResetOutputRange();
+        ResetMediaVisuals();
+        SetClipSelection([]);
+        _clipClipboard = [];
         CancelExport();
         InvalidatePreview();
         ClearEditHistory();
@@ -195,7 +200,7 @@ public partial class MainWindow
     {
         var selectedPath = (AssetGrid.SelectedItem as AssetRow)?.FullPath;
         var baseDirectory = _projectPath is null ? Environment.CurrentDirectory : Path.GetDirectoryName(_projectPath)!;
-        var rows = _project.MediaAssets.Select(asset => new AssetRow(asset.Id, Path.GetFileName(asset.Path),
+        var rows = _project.MediaAssets.Select(asset => new AssetRow(asset.Id, (File.Exists(Path.GetFullPath(asset.Path, baseDirectory)) ? "" : "⚠ 找不到檔案 · ") + Path.GetFileName(asset.Path),
             Path.GetFullPath(asset.Path, baseDirectory),
             asset.Kind switch { MediaKind.Video => "影片", MediaKind.Audio => "音訊", _ => "圖片" },
             FormatDuration(asset.Duration))).ToList();

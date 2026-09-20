@@ -2,12 +2,18 @@ namespace CutMaker.Core;
 
 public enum MediaKind { Video, Audio, Image }
 public enum TrackKind { Video, Audio }
-public enum FadeCurve { Linear, EaseIn, EaseOut, SmoothStep, EqualPower }
+public enum FadeCurve { Linear, EaseIn, EaseOut, SmoothStep, EqualPower, Custom }
+public enum VideoFadeMode { Opacity, Black }
 
 public sealed record VideoSettings(int Width = 1920, int Height = 1080, double Fps = 30);
-public sealed record FadeSettings(double Duration = 0, FadeCurve Curve = FadeCurve.Linear);
+/// <summary>
+/// Custom curves are cubic Bezier values with fixed time controls at 1/3 and 2/3.
+/// RangeStart/RangeEnd retain the original curve interval after a razor cut.
+/// </summary>
+public sealed record FadeSettings(double Duration = 0, FadeCurve Curve = FadeCurve.Linear,
+    double Control1 = 1.0 / 3, double Control2 = 2.0 / 3, double RangeStart = 0, double RangeEnd = 1);
 
-/// <summary>Duration is the usable source duration in seconds; images use a chosen still duration.</summary>
+/// <summary>Duration is the usable source duration in seconds; for stills it is only the initial placement duration.</summary>
 public sealed record MediaAsset(string Id, string Path, MediaKind Kind, double Duration);
 
 public sealed record Track(
@@ -18,7 +24,9 @@ public sealed record Track(
 public sealed record Clip(
     string Id, string AssetId, string TrackId,
     double Start, double SourceIn, double Duration,
-    double Gain = 1, FadeSettings? FadeIn = null, FadeSettings? FadeOut = null)
+    double Gain = 1, FadeSettings? FadeIn = null, FadeSettings? FadeOut = null,
+    FadeSettings? AudioFadeIn = null, FadeSettings? AudioFadeOut = null, bool SeparateAudioFades = false,
+    VideoFadeMode VideoFadeMode = VideoFadeMode.Opacity, string? LinkGroupId = null, bool SourceAudioMuted = false)
 {
     public double End => Start + Duration;
     public double SourceEnd => SourceIn + Duration;

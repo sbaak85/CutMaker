@@ -9,7 +9,7 @@ namespace CutMaker.App;
 
 public partial class MainWindow
 {
-    private sealed record EditSnapshot(CutProject Project, string? ClipId, string? TrackId);
+    private sealed record EditSnapshot(CutProject Project, string? ClipId, string? TrackId, string[] SelectedIds);
     private readonly List<EditSnapshot> _undo = [];
     private readonly List<EditSnapshot> _redo = [];
     private string? _selectedTrackId;
@@ -31,7 +31,7 @@ public partial class MainWindow
             Path = _projectPath is null ? Path.GetFullPath(asset.Path) : ProjectStore.ResolveAssetPath(_projectPath, asset)
         }).ToList(),
         Tracks = [.. _project.Tracks], Clips = [.. _project.Clips]
-    }, SelectedTimelineClipId, _selectedTrackId);
+    }, SelectedTimelineClipId, _selectedTrackId, SelectionIds().ToArray());
 
     internal void RecordUndo()
     {
@@ -70,7 +70,7 @@ public partial class MainWindow
         {
             MediaAssets = [.. snapshot.Project.MediaAssets], Tracks = [.. snapshot.Project.Tracks], Clips = [.. snapshot.Project.Clips]
         };
-        SelectedTimelineClipId = snapshot.ClipId; _selectedTrackId = snapshot.TrackId;
+        SetClipSelection(snapshot.SelectedIds, snapshot.ClipId); _selectedTrackId = snapshot.TrackId;
         _dirty = true;
         RefreshProject(); RefreshHistoryButtons(); InvalidatePreview();
         StatusText.Text = message;
@@ -85,14 +85,10 @@ public partial class MainWindow
 
     internal bool TryReplaceClip(Clip replacement, string message)
     {
-        if (!TimelineEditor.CanReplace(_project, replacement, out var reason)) { StatusText.Text = reason; return false; }
-        var index = _project.Clips.FindIndex(clip => clip.Id == replacement.Id);
-        if (_project.Clips[index] == replacement) return true;
-        RecordUndo();
-        _project.Clips[index] = replacement;
-        SelectedTimelineClipId = replacement.Id; _selectedTrackId = replacement.TrackId;
-        FinishEdit(message);
-        return true;
+        if (_project.Clips.FirstOrDefault(c => c.Id == replacement.Id) == replacement) return true;
+        var ok = CommitBatch(() => PlanLinkedReplacement(replacement), message);
+        if (ok) { SetClipSelection([replacement.Id], replacement.Id); _selectedTrackId = replacement.TrackId; RefreshTimeline(); }
+        return ok;
     }
 
     private void SplitClip_Click(object sender, RoutedEventArgs e) => SplitSelectedClip(PlayheadSeconds);
@@ -100,22 +96,14 @@ public partial class MainWindow
     {
         var clip = SelectedClip();
         if (clip is null) { StatusText.Text = "請先選取要切割的片段"; return false; }
-        if (_project.Tracks.Any(track => track.Id == clip.TrackId && track.Locked)) { StatusText.Text = "軌道已鎖定，無法切割"; return false; }
-        try
-        {
-            var (left, right) = ClipEditor.Split(clip, position, $"clip-{Guid.NewGuid():N}");
-            RecordUndo();
-            _project.Clips[_project.Clips.IndexOf(clip)] = left;
-            _project.Clips.Add(right);
-            SelectedTimelineClipId = right.Id;
-            FinishEdit("已在播放頭位置切割片段 · Ctrl+Z 復原");
-            return true;
-        }
-        catch (ProjectValidationException) { StatusText.Text = "請把播放頭移到片段內部；若切點落在 Fade 內，請先縮短或移除 Fade"; return false; }
+        var before = _project.Clips.Select(c => c.Id).ToHashSet();
+        var ok = CommitBatch(() => TimelineBatchEditor.Split(_project, SelectionIds(), position), "已在播放頭切割選取片段 · Fade 曲線保持連續");
+        if (ok) { SetClipSelection(_project.Clips.Where(c => !before.Contains(c.Id)).Select(c => c.Id)); RefreshTimeline(); }
+        return ok;
     }
 
     private Clip? SelectedClip() => _project.Clips.FirstOrDefault(clip => clip.Id == SelectedTimelineClipId);
-    internal void SelectTimelineClipForChecks(string? id) { SelectedTimelineClipId = id; RefreshTimeline(); }
+    internal void SelectTimelineClipForChecks(string? id) { SetClipSelection(id is null ? [] : [id]); RefreshTimeline(); }
 
     private void RefreshSelectionInspector()
     {
@@ -137,6 +125,7 @@ public partial class MainWindow
         if (FindName("TrackMutedBox") is CheckBox muted) { muted.IsChecked = track?.Muted ?? false; muted.IsEnabled = track is not null; }
         if (FindName("TrackLockedBox") is CheckBox locked) { locked.IsChecked = track?.Locked ?? false; locked.IsEnabled = track is not null; }
         if (FindName("ApplyTrackButton") is Button applyTrack) applyTrack.IsEnabled = track is not null;
+        RefreshEffectsInspector(clip);
     }
 
     private void SetNumber(string name, double? value)
@@ -152,7 +141,7 @@ public partial class MainWindow
         {
             new CurveChoice(FadeCurve.Linear, "線性"), new CurveChoice(FadeCurve.EaseIn, "慢進"),
             new CurveChoice(FadeCurve.EaseOut, "慢出"), new CurveChoice(FadeCurve.SmoothStep, "平滑 S"),
-            new CurveChoice(FadeCurve.EqualPower, "等功率")
+            new CurveChoice(FadeCurve.EqualPower, "等功率"), new CurveChoice(FadeCurve.Custom, "自訂曲線")
         };
         combo.DisplayMemberPath = nameof(CurveChoice.Name); combo.SelectedValuePath = nameof(CurveChoice.Curve);
         combo.SelectedValue = curve; combo.IsEnabled = enabled;
@@ -173,13 +162,11 @@ public partial class MainWindow
         var clip = SelectedClip(); if (clip is null) return;
         try
         {
-            TryReplaceClip(clip with
+            TryReplaceClip(ReadEffects(clip with
             {
                 Start = ReadNumber("ClipStartBox"), SourceIn = ReadNumber("ClipSourceInBox"), Duration = ReadNumber("ClipDurationBox"),
-                Gain = ReadNumber("ClipGainBox") / 100,
-                FadeIn = new(ReadNumber("FadeInBox"), ReadCurve("FadeInCurveBox")),
-                FadeOut = new(ReadNumber("FadeOutBox"), ReadCurve("FadeOutCurveBox"))
-            }, "已套用片段時間、音量與 Fade");
+                Gain = ReadNumber("ClipGainBox") / 100
+            }), "已套用片段時間、音量與 Fade");
         }
         catch (ProjectValidationException error) { StatusText.Text = error.Message; }
     }
@@ -221,7 +208,7 @@ public partial class MainWindow
     }
     internal void SelectTimelineTrack(string id)
     {
-        _selectedTrackId = id; SelectedTimelineClipId = null;
+        _selectedTrackId = id; SetClipSelection([]);
         RemoveClipButton.IsEnabled = false; RefreshSelectionInspector();
     }
 
@@ -249,7 +236,16 @@ public partial class MainWindow
 
     private void TimelineLane_MouseMove(object sender, MouseEventArgs e)
     {
-        if (_pointerOriginal is not { } original || _pointerLane is not { } captured) return;
+        if (_pointerOriginal is not { } original || _pointerLane is not { } captured)
+        {
+            if (sender is TimelineLane hovered)
+            {
+                var time = TimelineOffsetSeconds + e.GetPosition(hovered).X / TimelinePixelsPerSecond;
+                var hit = hovered.Clips?.FirstOrDefault(c => c.Start <= time && time < c.Start + c.Duration);
+                hovered.ToolTip = hit is null ? null : $"{hit.Name}\n起點 {FormatDuration(hit.Start)} · 長度 {FormatDuration(hit.Duration)}";
+            }
+            return;
+        }
         if (e.LeftButton != MouseButtonState.Pressed) { CancelPointerEdit(); return; }
         var local = e.GetPosition(captured);
         if (!_pointerMoved && Math.Abs(local.X - _pointerOrigin.X) < SystemParameters.MinimumHorizontalDragDistance &&
@@ -271,11 +267,14 @@ public partial class MainWindow
             {
                 PointerEdit.TrimStart => PlanPointerTrim(original, true, _pointerDownTime, rawTime),
                 PointerEdit.TrimEnd => PlanPointerTrim(original, false, _pointerDownTime, rawTime),
-                PointerEdit.FadeIn => original with { FadeIn = new(Math.Clamp(TimelinePlacement.RoundToFrame(Math.Max(0, rawTime - _pointerGrabOffset - original.Start), _project.Video.Fps), 0, original.Duration), original.FadeIn?.Curve ?? FadeCurve.Linear) },
-                PointerEdit.FadeOut => original with { FadeOut = new(Math.Clamp(TimelinePlacement.RoundToFrame(Math.Max(0, original.End - rawTime + _pointerGrabOffset), _project.Video.Fps), 0, original.Duration), original.FadeOut?.Curve ?? FadeCurve.Linear) },
+                PointerEdit.FadeIn => original with { FadeIn = (original.FadeIn ?? new()) with { Duration = Math.Clamp(TimelinePlacement.RoundToFrame(Math.Max(0, rawTime - _pointerGrabOffset - original.Start), _project.Video.Fps), 0, original.Duration), RangeStart = 0, RangeEnd = 1 } },
+                PointerEdit.FadeOut => original with { FadeOut = (original.FadeOut ?? new()) with { Duration = Math.Clamp(TimelinePlacement.RoundToFrame(Math.Max(0, original.End - rawTime + _pointerGrabOffset), _project.Video.Fps), 0, original.Duration), RangeStart = 0, RangeEnd = 1 } },
                 _ => original with { Start = SnapEditTime(Math.Max(0, rawTime - _pointerGrabOffset), original.Id, original.Duration), TrackId = (string)target.Tag }
             };
-            var allowed = TimelineEditor.CanReplace(_project, next, out var reason);
+            var allowed = true;
+            var reason = "";
+            try { PlanLinkedReplacement(next, _pointerMode == PointerEdit.Move); }
+            catch (ProjectValidationException error) { allowed = false; reason = error.Message; }
             _pointerCandidate = allowed ? next : null;
             target.SetDropPreview(next.Start, next.Duration, allowed);
             var action = _pointerMode switch { PointerEdit.Move => "移動", PointerEdit.FadeIn => $"淡入 {next.FadeIn!.Duration:0.###} 秒", PointerEdit.FadeOut => $"淡出 {next.FadeOut!.Duration:0.###} 秒", _ => "修剪" };
@@ -288,21 +287,24 @@ public partial class MainWindow
 
     internal Clip PlanPointerTrim(Clip original, bool trimStart, double pointerDownTime, double pointerTime)
     {
-        var duration = _project.MediaAssets.First(asset => asset.Id == original.AssetId).Duration;
+        var asset = _project.MediaAssets.First(asset => asset.Id == original.AssetId);
+        var duration = asset.Duration;
+        var image = asset.Kind == MediaKind.Image;
         var minimum = Math.Min(1 / _project.Video.Fps, original.Duration);
         // The press may be several pixels inside the edge. Apply only its drag delta to that edge.
         var originalEdge = trimStart ? original.Start : original.End;
         var edge = SnapEditTime(Math.Max(0, originalEdge + pointerTime - pointerDownTime), original.Id);
         return trimStart
-            ? ClipEditor.TrimStart(original, Math.Clamp(edge, Math.Max(0, original.Start - original.SourceIn), original.End - minimum), duration)
-            : ClipEditor.TrimEnd(original, Math.Clamp(edge, original.Start + minimum, original.Start + duration - original.SourceIn), duration);
+            ? ClipEditor.TrimStart(original, Math.Clamp(edge, image ? 0 : Math.Max(0, original.Start - original.SourceIn), original.End - minimum), duration, image)
+            : ClipEditor.TrimEnd(original, Math.Clamp(edge, original.Start + minimum, image ? double.MaxValue : original.Start + duration - original.SourceIn), duration, image);
     }
 
     private double SnapEditTime(double time, string clipId, double duration = 0)
     {
         var result = TimelinePlacement.RoundToFrame(time, _project.Video.Fps);
         var tolerance = Math.Min(.25, 8 / TimelinePixelsPerSecond);
-        var boundaries = _project.Clips.Where(clip => clip.Id != clipId).SelectMany(clip => new[] { clip.Start, clip.End }).Prepend(0);
+        var selected = SelectionIds();
+        var boundaries = _project.Clips.Where(clip => clip.Id != clipId && !selected.Contains(clip.Id)).SelectMany(clip => new[] { clip.Start, clip.End }).Prepend(0);
         var candidates = boundaries.SelectMany(edge => duration > 0 ? new[] { edge, edge - duration } : new[] { edge }).Where(value => value >= 0);
         var nearest = candidates.MinBy(value => Math.Abs(value - result));
         return Math.Abs(nearest - result) <= tolerance ? nearest : result;
@@ -312,8 +314,9 @@ public partial class MainWindow
     {
         var candidate = _pointerCandidate;
         var moved = _pointerMoved;
+        var moveSelection = _pointerMode == PointerEdit.Move;
         CancelPointerEdit();
-        if (moved && candidate is not null) TryReplaceClip(candidate, "已更新片段位置與長度 · Ctrl+Z 復原");
+        if (moved && candidate is not null) CommitBatch(() => PlanLinkedReplacement(candidate, moveSelection), "已更新選取片段 · Ctrl+Z 復原");
         e.Handled = true;
     }
     private void TimelineLane_LostCapture(object sender, MouseEventArgs e) => CancelPointerEdit();

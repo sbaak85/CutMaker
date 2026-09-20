@@ -54,11 +54,11 @@ public static class ProjectValidator
             Require(tracks.TryGetValue(clip.TrackId, out var track), $"Missing track: {clip.TrackId}");
             Require(track!.Kind == TrackKind.Audio ? asset!.Kind != MediaKind.Image : asset!.Kind != MediaKind.Audio,
                 "The media kind is incompatible with its track.");
-            ValidateClip(clip, asset.Duration);
+            ValidateClip(clip, asset.Duration, asset.Kind == MediaKind.Image);
         }
     }
 
-    internal static void ValidateClip(Clip clip, double assetDuration)
+    internal static void ValidateClip(Clip clip, double assetDuration, bool isStillImage = false)
     {
         ArgumentNullException.ThrowIfNull(clip);
         PositiveTime(assetDuration, "Asset duration");
@@ -66,10 +66,16 @@ public static class ProjectValidator
         NonNegativeTime(clip.SourceIn, "Clip source in-point");
         PositiveTime(clip.Duration, "Clip duration");
         Require(double.IsFinite(clip.End) && double.IsFinite(clip.SourceEnd), "Clip end time is out of range.");
-        Require(clip.SourceEnd <= assetDuration + TimeTolerance, "Clip extends past the source duration.");
+        // Early projects stored a source offset when trimming stills. Keep those files readable;
+        // new still trims/splits canonicalize the meaningless offset to zero.
+        if (!isStillImage) Require(clip.SourceEnd <= assetDuration + TimeTolerance, "Clip extends past the source duration.");
         Gain(clip.Gain, "Clip gain");
         ValidateFade(clip.FadeIn, clip.Duration);
         ValidateFade(clip.FadeOut, clip.Duration);
+        ValidateFade(clip.AudioFadeIn, clip.Duration);
+        ValidateFade(clip.AudioFadeOut, clip.Duration);
+        Require(Enum.IsDefined(clip.VideoFadeMode), "Unknown video Fade mode.");
+        Require(clip.LinkGroupId is null || !string.IsNullOrWhiteSpace(clip.LinkGroupId), "A linked group ID cannot be empty.");
     }
 
     private static void ValidateFade(FadeSettings? fade, double duration)
@@ -78,12 +84,18 @@ public static class ProjectValidator
         NonNegativeTime(fade.Duration, "Fade duration");
         Require(fade.Duration <= duration + TimeTolerance, "Fade cannot be longer than its clip.");
         Require(Enum.IsDefined(fade.Curve), "Unknown fade curve.");
+        UnitValue(fade.Control1, "Fade control 1");
+        UnitValue(fade.Control2, "Fade control 2");
+        UnitValue(fade.RangeStart, "Fade range start");
+        UnitValue(fade.RangeEnd, "Fade range end");
+        Require(fade.RangeStart <= fade.RangeEnd, "Fade curve range must be ordered.");
     }
 
     private static void Text(string? value, string name) => Require(!string.IsNullOrWhiteSpace(value), $"{name} is required.");
     private static void PositiveTime(double value, string name) => Require(double.IsFinite(value) && value > 0, $"{name} must be positive and finite.");
     private static void NonNegativeTime(double value, string name) => Require(double.IsFinite(value) && value >= 0, $"{name} must be non-negative and finite.");
     private static void Gain(double value, string name) => Require(double.IsFinite(value) && value >= 0 && value <= 4, $"{name} must be between 0 and 4.");
+    private static void UnitValue(double value, string name) => Require(double.IsFinite(value) && value >= 0 && value <= 1, $"{name} must be between 0 and 1.");
 
     internal static void Require(bool condition, string message)
     {
