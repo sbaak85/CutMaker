@@ -15,6 +15,11 @@ if (args.Contains("--audio-only"))
         if (!condition) throw new InvalidOperationException(message);
         Console.WriteLine("PASS: " + message);
     });
+    await AudioPreviewCacheChecks.Run(Path.Combine(folder, "audio-preview-cache"), (condition, message) =>
+    {
+        if (!condition) throw new InvalidOperationException(message);
+        Console.WriteLine("PASS: " + message);
+    });
     return;
 }
 var ffmpeg = MediaRenderService.FindTool("ffmpeg.exe");
@@ -28,6 +33,7 @@ void Check(bool condition, string message)
 }
 Task<string> Run(params string[] values) => MediaRenderService.RunToolAsync(ffmpeg,
     new[] { "-hide_banner", "-loglevel", "error", "-nostdin", "-y" }.Concat(values), CancellationToken.None);
+PreviewRenderCacheChecks.Run(Path.Combine(folder, "preview-cache"), Check);
 var colorPath = Path.Combine(folder, "原片 [保留]; ' 雙色與音訊.mp4");
 var bluePath = Path.Combine(folder, "blue-no-audio.mp4");
 var tonePath = Path.Combine(folder, "tone-880.wav");
@@ -212,6 +218,7 @@ using (var cancellation = new CancellationTokenSource())
 }
 Check(hashes.All(pair => SHA256.HashData(File.ReadAllBytes(pair.Key)).SequenceEqual(pair.Value)), "source hashes remain unchanged after canceled render");
 await AudioContinuityChecks.Run(Path.Combine(folder, "audio-continuity"), Check);
+await AudioPreviewCacheChecks.Run(Path.Combine(folder, "audio-preview-cache"), Check);
 await File.WriteAllLinesAsync(Path.Combine(folder, "render-result.txt"), notes);
 Console.WriteLine($"{notes.Count}/{notes.Count} render integration checks passed. Artifacts: {folder}");
 

@@ -75,14 +75,14 @@ public partial class MainWindow
         };
         SetClipSelection(snapshot.SelectedIds, snapshot.ClipId); _selectedTrackId = snapshot.TrackId;
         _dirty = true;
-        RefreshProject(); RefreshHistoryButtons(); InvalidatePreview();
+        RefreshProject(); RefreshHistoryButtons(); RefreshPreviewAfterEdit();
         StatusText.Text = message;
     }
 
     internal void FinishEdit(string message)
     {
         _dirty = true;
-        RefreshTimeline(); UpdateTitle(); RefreshHistoryButtons(); InvalidatePreview();
+        RefreshTimeline(); UpdateTitle(); RefreshHistoryButtons(); RefreshPreviewAfterEdit();
         StatusText.Text = message;
     }
 

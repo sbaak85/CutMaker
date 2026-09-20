@@ -73,6 +73,7 @@ public partial class MainWindow
         Require(!TryHandleTransportKey(Key.Space, ModifierKeys.Control, lane), "Modified Space is not intercepted.");
 
         SeekPreview(.2);
+        InvalidatePreview();
         var prepare = PreparePreviewAsync();
         Require(_previewPreparing, "Pending-prepare fixture must be real.");
         Space(TimelineTimeRuler); await _transportTask;
@@ -80,6 +81,7 @@ public partial class MainWindow
         await prepare;
         Require(PreviewIsReady && _previewPlaying, "Queued playback must start after native media opens.");
         PausePreview();
+        InvalidatePreview();
         prepare = PreparePreviewAsync(playWhenReady: true);
         Space(TimelineTimeRuler); await _transportTask;
         Require(!_previewPlayWhenReady, "A second transport intent can cancel pending autoplay.");

@@ -90,9 +90,10 @@ public partial class MainWindow
             SelectedEnd_Click(this, new RoutedEventArgs()); Near(12.157, PlayheadSeconds, "Selected range end");
             Unchanged("Clip-boundary navigation");
 
-            _previewPreparing = true; _previewRangeStart = 0; _previewRangeEnd = 20; _previewPlaying = true;
+            _previewPreparing = true; _previewRangeStart = 0; _previewRangeEnd = 20; _previewPlaying = true; _previewPlayWhenReady = true;
             NavigatePlayhead(1.5);
-            Require(!_previewPreparing && !_previewPlaying, "Navigation must cancel pending autoplay even inside its prepared window");
+            Require(_previewPreparing && !_previewPlaying && !_previewPlayWhenReady, "Navigation must cancel pending autoplay without discarding the preload");
+            _previewPreparing = false;
             NavigatePlayhead(330.013);
             var x = (PlayheadSeconds - TimelineOffsetSeconds) * TimelinePixelsPerSecond;
             Require(TimelineOffsetSeconds > 0 && x >= 0 && x < TimelineViewportWidth, "Navigation follows the playhead horizontally");

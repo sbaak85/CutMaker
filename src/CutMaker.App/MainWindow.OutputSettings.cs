@@ -170,7 +170,7 @@ public partial class MainWindow
         _undo.Clear(); _undo.AddRange(undo); _redo.Clear(); _redo.AddRange(redo);
         _exportVideoQuality = quality; _exportAudioBitrate = bitrate; _exportMarkedRange = marked;
         _exportInSeconds = inTime; _exportOutSeconds = outTime;
-        RefreshProject(); RefreshHistoryButtons(); InvalidatePreview();
+        RefreshProject(); RefreshHistoryButtons(); RefreshPreviewAfterEdit();
         if (failure is not null) throw failure;
         File.WriteAllText(Path.Combine(folder, "output-settings-result.txt"),
             "PASS: output settings dialog rendered; invalid range rejected; portrait, 60 fps, high quality and 320 kbps applied; project settings undo restores original values.");

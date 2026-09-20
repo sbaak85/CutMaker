@@ -165,7 +165,7 @@ public partial class MainWindow : Window
         _project.Tracks.Add(new(Guid.NewGuid().ToString("N"), $"{prefix} {_project.Tracks.Count(track => track.Kind == kind) + 1}", kind));
         _dirty = true;
         RefreshProject();
-        InvalidatePreview();
+        RefreshPreviewAfterEdit();
         StatusText.Text = $"已新增{prefix}軌";
     }
 

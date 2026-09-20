@@ -70,8 +70,8 @@ public partial class MainWindow
     internal void NavigatePlayhead(double seconds, string label = "定位", bool preciseFrame = false)
     {
         if (NavigationGestureActive || !double.IsFinite(seconds)) return;
-        // A pending prepare may have captured playWhenReady=true; stopping only its current clock is insufficient.
-        if (_previewPreparing) InvalidatePreview();
+        // Navigation pauses transport without discarding an in-flight whole-project preload.
+        _previewPlayWhenReady = false;
         PausePreview();
         SeekPreview(Math.Clamp(seconds, 0, PreviewDuration));
         if (preciseFrame && PreviewIsReady) QueuePreviewFrame();

@@ -53,7 +53,7 @@
                 <TextBlock Text="CutMaker" FontSize="25" FontWeight="SemiBold" VerticalAlignment="Center" />
                 <TextBlock Text="專注每一段畫面與聲音" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="18,0,0,0" />
             </StackPanel>
-            <TextBlock Grid.Column="1" Text="0.5.1 · 時間尺快捷鍵修正" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="0.6 · 完整預覽快取" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
         </Grid>
         <WrapPanel x:Name="ProjectToolbar" Grid.Row="1">
             <Button Content="新增專案" Click="New_Click" ToolTip="Ctrl+N" />
@@ -149,7 +149,7 @@
                         <Slider x:Name="PreviewSeekSlider" Minimum="0" Maximum="1" ValueChanged="PreviewSeek_ValueChanged" IsMoveToPointEnabled="True" InputMethod.IsInputMethodEnabled="False"
                                 PreviewMouseLeftButtonDown="PreviewSeek_PointerDown" PreviewMouseLeftButtonUp="PreviewSeek_PointerUp" ToolTip="拖曳試看／定位播放頭" />
                         <WrapPanel HorizontalAlignment="Center" Margin="0,6,0,0">
-                            <Button x:Name="PreparePreviewButton" Content="更新" Click="PreparePreview_Click" Padding="8,5" ToolTip="從播放頭更新預覽" />
+                            <Button x:Name="PreparePreviewButton" Content="更新" Click="PreparePreview_Click" Padding="8,5" ToolTip="準備完整預覽；內容未變更時重用快取" />
                             <Button Content="‹" Click="FrameBack_Click" Padding="8,5" ToolTip="前一格 · ←" AutomationProperties.Name="前一格" />
                             <Button x:Name="PreviewPlayButton" Content="播放" Click="PreviewPlay_Click" Padding="8,5" ToolTip="Space" />
                             <Button x:Name="PreviewStopButton" Content="停止" Click="PreviewStop_Click" Padding="8,5" />

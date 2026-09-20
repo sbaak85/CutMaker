@@ -95,8 +95,19 @@ public static partial class MediaRenderService
         var id = Guid.NewGuid().ToString("N");
         var temporary = Path.Combine(Path.GetDirectoryName(output)!, $".cutmaker-{id}{Path.GetExtension(output)}");
         var filterPath = Path.Combine(Path.GetDirectoryName(output)!, $".cutmaker-{id}.filters.txt");
+        var cachedAudio = new Dictionary<string, AudioPreviewCache.Lease>();
         try
         {
+            if (options.Preview && !options.FrameOnly)
+            {
+                foreach (var assetId in clips.Where(clip => !clip.SourceAudioMuted && streams[clip.AssetId].Audio &&
+                    assets[clip.AssetId].Kind != MediaKind.Image).Select(clip => clip.AssetId).Distinct())
+                {
+                    var cached = await AudioPreviewCache.Shared.AcquireAsync(paths[assetId], assets[assetId].Duration,
+                        ffmpeg, progress, cancellationToken).ConfigureAwait(false);
+                    if (cached is not null) cachedAudio.Add(assetId, cached);
+                }
+            }
             var arguments = new List<string> { "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-filter_complex_threads", "2" };
             var graph = new List<string>();
             var visualLabels = new List<(Clip Clip, int TrackIndex, string Label)>();
@@ -147,7 +158,7 @@ public static partial class MediaRenderService
                 graph.Add($"{current}format=yuv420p[vout]");
             }
             if (!options.FrameOnly)
-                AddAudioGraph(arguments, graph, clips, paths, tracks, streams, assets, rangeStart, rangeEnd, ref inputCount);
+                AddAudioGraph(arguments, graph, clips, paths, tracks, streams, assets, cachedAudio, rangeStart, rangeEnd, ref inputCount);
             await File.WriteAllTextAsync(filterPath, string.Join(";\n", graph), new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
             arguments.AddRange(["-/filter_complex", filterPath]);
             if (options.FrameOnly) arguments.AddRange(["-map", "[vout]", "-frames:v", "1", "-c:v", "png", "-update", "1", "-threads", "2"]);
@@ -155,7 +166,7 @@ public static partial class MediaRenderService
             {
                 var crf = options.VideoQuality switch { ExportVideoQuality.Compact => "26", ExportVideoQuality.High => "17", _ => "20" };
                 if (!audioOnly) arguments.AddRange(["-map", "[vout]", "-c:v", "libx264", "-preset", options.Preview ? "ultrafast" : "veryfast", "-crf", options.Preview ? "25" : crf, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-threads", "4"]);
-                arguments.AddRange(["-map", "[aout]", "-c:a", wave ? "pcm_f32le" : mp3 ? "libmp3lame" : "aac"]);
+                arguments.AddRange(["-map", "[aout]", "-c:a", wave ? options.Preview ? "pcm_s16le" : "pcm_f32le" : mp3 ? "libmp3lame" : "aac"]);
                 if (!wave) arguments.AddRange(["-b:a", $"{options.AudioBitrateKbps}k"]);
                 var audioDuration = (AudioSampleClock.At(rangeEnd) - AudioSampleClock.At(rangeStart)) / (double)AudioSampleClock.Rate;
                 arguments.AddRange(["-ar", "48000", "-ac", "2", "-t", Exact(audioDuration)]);
@@ -177,6 +188,7 @@ public static partial class MediaRenderService
         }
         finally
         {
+            foreach (var cached in cachedAudio.Values) cached.Dispose();
             DeleteTemporary(temporary);
             DeleteTemporary(filterPath);
         }

@@ -275,7 +275,7 @@ public partial class MainWindow
         var time = TimelineOffsetSeconds + point.X / TimelinePixelsPerSecond;
         var selected = _project.Clips.LastOrDefault(clip => clip.TrackId == (string)lane.Tag && clip.Start <= time && time < clip.End);
         _selectedTrackId = (string)lane.Tag;
-        if (_previewPreparing) InvalidatePreview();
+        _previewPlayWhenReady = false;
         PausePreview();
         if (selected is null)
         {
