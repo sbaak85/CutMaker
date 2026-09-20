@@ -16,7 +16,7 @@ public sealed record MediaRenderProgress(double Fraction, string Message);
 public sealed record MediaRenderResult(string OutputPath, double Duration, int Width, int Height);
 
 /// <summary>One render graph for preview and export; inputs are opened read-only and output is replaced only on success.</summary>
-public static class MediaRenderService
+public static partial class MediaRenderService
 {
     private static string N(double value) => value.ToString("0.#########", CultureInfo.InvariantCulture);
 
@@ -31,9 +31,13 @@ public static class MediaRenderService
         if (project.Clips.Count == 0) throw new InvalidOperationException("時間軸沒有片段可匯出，請先將素材放入軌道。");
         var output = Path.GetFullPath(outputPath);
         var mp3 = string.Equals(Path.GetExtension(output), ".mp3", StringComparison.OrdinalIgnoreCase);
+        // Lossless PCM is also used by sample-accurate audio verification; the export dialog
+        // continues to offer the ordinary MP4/MP3 delivery formats.
+        var wave = string.Equals(Path.GetExtension(output), ".wav", StringComparison.OrdinalIgnoreCase);
+        var audioOnly = mp3 || wave;
         if (options.FrameOnly ? !string.Equals(Path.GetExtension(output), ".png", StringComparison.OrdinalIgnoreCase) :
-            !mp3 && !string.Equals(Path.GetExtension(output), ".mp4", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("請選擇 .mp4 或 .mp3 輸出檔名。");
+            !audioOnly && !string.Equals(Path.GetExtension(output), ".mp4", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("請選擇 .mp4、.mp3 或 .wav 輸出檔名。");
         var assets = project.MediaAssets.ToDictionary(asset => asset.Id);
         var paths = assets.ToDictionary(pair => pair.Key, pair => projectPath is null
             ? Path.GetFullPath(pair.Value.Path) : ProjectStore.ResolveAssetPath(projectPath, pair.Value));
@@ -95,15 +99,15 @@ public static class MediaRenderService
         {
             var arguments = new List<string> { "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-filter_complex_threads", "2" };
             var graph = new List<string>();
-            var audioLabels = new List<string> { "[silence]" };
             var visualLabels = new List<(Clip Clip, int TrackIndex, string Label)>();
+            var inputCount = 0;
             // A finite black/silence canvas retains timeline gaps and the tails of muted tracks.
-            if (!mp3) graph.Add($"color=c=black:s={width}x{height}:r={N(fps)}:d={N(duration)},format=yuv420p[canvas]");
-            if (!options.FrameOnly) graph.Add($"anullsrc=r=48000:cl=stereo,atrim=duration={N(duration)},asetpts=PTS-STARTPTS[silence]");
+            if (!audioOnly) graph.Add($"color=c=black:s={width}x{height}:r={N(fps)}:d={N(duration)},format=yuv420p[canvas]");
             for (var i = 0; i < clips.Count; i++)
             {
                 var clip = clips[i];
                 var asset = assets[clip.AssetId];
+                if (audioOnly || tracks[clip.TrackId].Kind != TrackKind.Video || !streams[clip.AssetId].Video) continue;
                 var clipOffset = Math.Max(rangeStart - clip.Start, 0);
                 var segment = clip with { Start = Math.Max(clip.Start - rangeStart, 0), SourceIn = clip.SourceIn + clipOffset,
                     Duration = Math.Min(clip.End, rangeEnd) - Math.Max(clip.Start, rangeStart) };
@@ -113,10 +117,10 @@ public static class MediaRenderService
                     arguments.AddRange(["-loop", "1", "-framerate", N(fps), "-t", N(segment.Duration), "-i", paths[clip.AssetId]]);
                 else
                     arguments.AddRange(["-ss", N(segment.SourceIn), "-t", N(segment.Duration), "-i", paths[clip.AssetId]]);
+                var input = inputCount++;
 
-                if (!mp3 && tracks[clip.TrackId].Kind == TrackKind.Video && streams[clip.AssetId].Video)
                 {
-                    var filter = $"[{i}:v:0]trim=duration={N(segment.Duration)},setpts=PTS-STARTPTS,fps={N(fps)}," +
+                    var filter = $"[{input}:v:0]trim=duration={N(segment.Duration)},setpts=PTS-STARTPTS,fps={N(fps)}," +
                         $"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuva420p";
                     if ((clip.FadeIn?.Duration ?? 0) > 0 || (clip.FadeOut?.Duration ?? 0) > 0)
                     {
@@ -129,17 +133,8 @@ public static class MediaRenderService
                     graph.Add(filter);
                     visualLabels.Add((segment, project.Tracks.FindIndex(track => track.Id == clip.TrackId), $"[v{i}]"));
                 }
-                if (!options.FrameOnly && !clip.SourceAudioMuted && streams[clip.AssetId].Audio && asset.Kind != MediaKind.Image)
-                {
-                    var gain = clip.Gain * tracks[clip.TrackId].Volume;
-                    var expression = $"{N(gain)}*({FadeEnvelope.GainExpression(clip, $"(t+{N(clipOffset)})", audio: true)})";
-                    graph.Add($"[{i}:a:0]atrim=duration={N(segment.Duration)},asetpts=PTS-STARTPTS,aresample=48000," +
-                        $"aformat=sample_fmts=dblp:channel_layouts=stereo,aeval=exprs='val(0)*({expression})|val(1)*({expression})':c=stereo," +
-                        $"adelay={Math.Round(segment.Start * 48000).ToString(CultureInfo.InvariantCulture)}S:all=1[a{i}]");
-                    audioLabels.Add($"[a{i}]");
-                }
             }
-            if (!mp3)
+            if (!audioOnly)
             {
                 var current = "[canvas]";
                 var layer = 0;
@@ -151,16 +146,19 @@ public static class MediaRenderService
                 }
                 graph.Add($"{current}format=yuv420p[vout]");
             }
-            if (!options.FrameOnly) graph.Add($"{string.Concat(audioLabels)}amix=inputs={audioLabels.Count}:duration=longest:dropout_transition=0:normalize=0," +
-                $"alimiter=limit=0.95:level=false:latency=true,apad,atrim=duration={N(duration)}[aout]");
+            if (!options.FrameOnly)
+                AddAudioGraph(arguments, graph, clips, paths, tracks, streams, assets, rangeStart, rangeEnd, ref inputCount);
             await File.WriteAllTextAsync(filterPath, string.Join(";\n", graph), new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
             arguments.AddRange(["-/filter_complex", filterPath]);
             if (options.FrameOnly) arguments.AddRange(["-map", "[vout]", "-frames:v", "1", "-c:v", "png", "-update", "1", "-threads", "2"]);
             else
             {
                 var crf = options.VideoQuality switch { ExportVideoQuality.Compact => "26", ExportVideoQuality.High => "17", _ => "20" };
-                if (!mp3) arguments.AddRange(["-map", "[vout]", "-c:v", "libx264", "-preset", options.Preview ? "ultrafast" : "veryfast", "-crf", options.Preview ? "25" : crf, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-threads", "4"]);
-                arguments.AddRange(["-map", "[aout]", "-c:a", mp3 ? "libmp3lame" : "aac", "-b:a", $"{options.AudioBitrateKbps}k", "-ar", "48000", "-ac", "2", "-t", N(duration)]);
+                if (!audioOnly) arguments.AddRange(["-map", "[vout]", "-c:v", "libx264", "-preset", options.Preview ? "ultrafast" : "veryfast", "-crf", options.Preview ? "25" : crf, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-threads", "4"]);
+                arguments.AddRange(["-map", "[aout]", "-c:a", wave ? "pcm_f32le" : mp3 ? "libmp3lame" : "aac"]);
+                if (!wave) arguments.AddRange(["-b:a", $"{options.AudioBitrateKbps}k"]);
+                var audioDuration = (AudioSampleClock.At(rangeEnd) - AudioSampleClock.At(rangeStart)) / (double)AudioSampleClock.Rate;
+                arguments.AddRange(["-ar", "48000", "-ac", "2", "-t", Exact(audioDuration)]);
             }
             arguments.AddRange(["-progress", "pipe:1", "-nostats", temporary]);
             progress?.Report(new(0, options.Preview ? "正在準備預覽…" : "正在匯出…"));

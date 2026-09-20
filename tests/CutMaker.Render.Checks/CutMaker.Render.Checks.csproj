@@ -6,5 +6,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\CutMaker.Core\CutMaker.Core.csproj" />
     <Compile Include="..\..\src\CutMaker.App\MediaRenderService.cs" Link="MediaRenderService.cs" />
+    <Compile Include="..\..\src\CutMaker.App\MediaRenderService.Audio.cs" Link="MediaRenderService.Audio.cs" />
   </ItemGroup>
 </Project>

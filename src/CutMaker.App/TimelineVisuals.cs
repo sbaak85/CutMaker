@@ -28,6 +28,9 @@ public sealed class TimelineLane : FrameworkElement
     public static readonly DependencyProperty IsLockedProperty = DependencyProperty.Register(
         nameof(IsLocked), typeof(bool), typeof(TimelineLane),
         new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsRender));
+    public static readonly DependencyProperty IsCompactProperty = DependencyProperty.Register(
+        nameof(IsCompact), typeof(bool), typeof(TimelineLane),
+        new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsRender));
     public static readonly DependencyProperty SelectedClipIdsProperty = DependencyProperty.Register(
         nameof(SelectedClipIds), typeof(IReadOnlyList<string>), typeof(TimelineLane),
         new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
@@ -87,6 +90,12 @@ public sealed class TimelineLane : FrameworkElement
         get => (bool)GetValue(IsLockedProperty);
         set => SetValue(IsLockedProperty, value);
     }
+    public bool IsCompact
+    {
+        get => (bool)GetValue(IsCompactProperty);
+        set => SetValue(IsCompactProperty, value);
+    }
+    public double FadeHandleHitHeight => IsCompact ? 9 : 17;
     public IReadOnlyList<string>? SelectedClipIds
     { get => (IReadOnlyList<string>?)GetValue(SelectedClipIdsProperty); set => SetValue(SelectedClipIdsProperty, value); }
     public double PlayheadSeconds { get => (double)GetValue(PlayheadSecondsProperty); set => SetValue(PlayheadSecondsProperty, value); }
@@ -136,7 +145,7 @@ public sealed class TimelineLane : FrameworkElement
             if (preview.Width > 24)
                 TimelineDrawing.DrawText(this, drawing,
                     $"{(allowed ? "放入" : "無法放入")} {TimelineDrawing.FormatTime(start)}", 12,
-                    TimelineDrawing.Foreground, new Point(preview.Left + 8, preview.Top + 6), preview.Width - 16);
+                    TimelineDrawing.Foreground, new Point(preview.Left + 8, preview.Top + (IsCompact ? 5 : 6)), preview.Width - 16);
         }
 
         foreach (var ghost in MovePreviews)
@@ -144,7 +153,7 @@ public sealed class TimelineLane : FrameworkElement
             {
                 drawing.DrawRoundedRectangle(AllowedFill, AllowedPen, boundsPreview, 4, 4);
                 TimelineDrawing.DrawText(this, drawing, $"移動 {TimelineDrawing.FormatTime(ghost.Start, true)}", 11,
-                    TimelineDrawing.Foreground, new Point(boundsPreview.Left + 6, boundsPreview.Top + 7), boundsPreview.Width - 12);
+                    TimelineDrawing.Foreground, new Point(boundsPreview.Left + 6, boundsPreview.Top + (IsCompact ? 5 : 7)), boundsPreview.Width - 12);
             }
 
         var playheadX = (PlayheadSeconds - OffsetSeconds) * PixelsPerSecond;
@@ -163,10 +172,13 @@ public sealed class TimelineLane : FrameworkElement
         // Thin edge grips make the two trim targets discoverable. Fade ranges remain visible when selected.
         var actualLeft = (clip.Start - OffsetSeconds) * PixelsPerSecond;
         var actualRight = (clip.Start + clip.Duration - OffsetSeconds) * PixelsPerSecond;
-        if (rect.Width > 26 && rect.Height > 50)
+        if (rect.Width > 26 && (rect.Height > 50 || IsCompact))
         {
-            var visualRect = new Rect(rect.Left + 7, rect.Top + 42, Math.Max(1, rect.Width - 14), Math.Max(1, rect.Height - 46));
+            var visualRect = IsCompact
+                ? new Rect(rect.Left + 3, rect.Top + 2, Math.Max(1, rect.Width - 6), Math.Max(1, rect.Height - 4))
+                : new Rect(rect.Left + 7, rect.Top + 42, Math.Max(1, rect.Width - 14), Math.Max(1, rect.Height - 46));
             drawing.PushClip(new RectangleGeometry(visualRect));
+            if (IsCompact) drawing.PushOpacity(.42);
             if (clip.Waveform is not null && clip.SourceDuration > 0)
             {
                 // The cached waveform spans the source. Use source coordinates so trimmed clips stay aligned.
@@ -176,12 +188,14 @@ public sealed class TimelineLane : FrameworkElement
             }
             if (clip.Thumbnail is not null && clip.Kind != MediaKind.Audio)
                 drawing.DrawImage(clip.Thumbnail, new Rect(visualRect.Left, visualRect.Top, Math.Min(visualRect.Width, visualRect.Height * 16 / 9), visualRect.Height));
+            if (IsCompact) drawing.Pop();
             drawing.Pop();
         }
         if (clip.Id == SelectedClipId && rect.Width >= 18)
         {
-            if (actualLeft >= 0) drawing.DrawLine(SelectionPen, new Point(actualLeft + 4, rect.Top + 9), new Point(actualLeft + 4, rect.Bottom - 9));
-            if (actualRight <= ActualWidth) drawing.DrawLine(SelectionPen, new Point(actualRight - 4, rect.Top + 9), new Point(actualRight - 4, rect.Bottom - 9));
+            var gripInset = IsCompact ? 6 : 9;
+            if (actualLeft >= 0) drawing.DrawLine(SelectionPen, new Point(actualLeft + 4, rect.Top + gripInset), new Point(actualLeft + 4, rect.Bottom - gripInset));
+            if (actualRight <= ActualWidth) drawing.DrawLine(SelectionPen, new Point(actualRight - 4, rect.Top + gripInset), new Point(actualRight - 4, rect.Bottom - gripInset));
         }
         if (clip.FadeIn > 0)
             drawing.DrawLine(TimelineDrawing.FadePen, new Point(actualLeft, rect.Bottom - 3),
@@ -193,8 +207,8 @@ public sealed class TimelineLane : FrameworkElement
 
         var textX = rect.Left + 8;
         var textWidth = rect.Width - 16;
-        TimelineDrawing.DrawText(this, drawing, clip.Name, 12, TimelineDrawing.Foreground,
-            new Point(textX, rect.Top + 5), textWidth);
+        TimelineDrawing.DrawText(this, drawing, clip.Name, IsCompact ? 11 : 12, TimelineDrawing.Foreground,
+            new Point(textX, rect.Top + (IsCompact ? 7 : 5)), textWidth);
         if (rect.Height >= 40)
             TimelineDrawing.DrawText(this, drawing,
                 $"{TimelineDrawing.FormatTime(clip.Start)} · {TimelineDrawing.FormatTime(clip.Duration, true)}",
@@ -204,8 +218,9 @@ public sealed class TimelineLane : FrameworkElement
             var edge = Math.Min(8, clip.Duration * PixelsPerSecond / 4);
             var fadeInHandle = Math.Clamp(actualLeft + clip.FadeIn * PixelsPerSecond, actualLeft + edge, actualRight - edge);
             var fadeOutHandle = Math.Clamp(actualRight - clip.FadeOut * PixelsPerSecond, actualLeft + edge, actualRight - edge);
-            drawing.DrawRectangle(TimelineDrawing.PlayheadPen.Brush, null, new Rect(fadeInHandle - 4, rect.Top + 1, 8, 8));
-            drawing.DrawRectangle(TimelineDrawing.PlayheadPen.Brush, null, new Rect(fadeOutHandle - 4, rect.Top + 1, 8, 8));
+            var handle = IsCompact ? 6 : 8;
+            drawing.DrawRectangle(TimelineDrawing.PlayheadPen.Brush, null, new Rect(fadeInHandle - handle / 2, rect.Top + 1, handle, handle));
+            drawing.DrawRectangle(TimelineDrawing.PlayheadPen.Brush, null, new Rect(fadeOutHandle - handle / 2, rect.Top + 1, handle, handle));
         }
     }
 
@@ -219,7 +234,8 @@ public sealed class TimelineLane : FrameworkElement
         var left = Math.Max(0, (Math.Max(start, OffsetSeconds) - OffsetSeconds) * PixelsPerSecond);
         var right = Math.Min(ActualWidth, (Math.Min(end, viewportEnd) - OffsetSeconds) * PixelsPerSecond);
         if (!double.IsFinite(left) || !double.IsFinite(right) || right <= left) return false;
-        rect = new Rect(left, 5, right - left, ActualHeight - 10);
+        var inset = IsCompact ? 2 : 5;
+        rect = new Rect(left, inset, right - left, ActualHeight - inset * 2);
         return true;
     }
 
@@ -235,7 +251,7 @@ public sealed class TimelineLane : FrameworkElement
             var nearEdge = hit is not null && (Math.Abs((time - hit.Start) * PixelsPerSecond) <= edgeWidth ||
                 Math.Abs((hit.Start + hit.Duration - time) * PixelsPerSecond) <= edgeWidth);
             var nearFade = false;
-            if (hit is not null && point.Y <= 17)
+            if (hit is not null && point.Y <= FadeHandleHitHeight)
             {
                 var left = (hit.Start - OffsetSeconds) * PixelsPerSecond;
                 var right = left + hit.Duration * PixelsPerSecond;

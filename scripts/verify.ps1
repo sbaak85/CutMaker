@@ -20,6 +20,9 @@ Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'smoke\editing-result
 Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'smoke\batch-result.txt')
 Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'smoke\convenience-result.txt')
 Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'smoke\navigation-result.txt')
+Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'smoke\zoom-range-result.txt')
+Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'smoke\track-controls-result.txt')
+Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'smoke\transport-result.txt')
 Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'smoke\recovery-result.txt')
 Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'smoke\preview-result.txt')
 & $script:CutMakerDotnet run --project 'tests\CutMaker.Render.Checks\CutMaker.Render.Checks.csproj' --configuration Release --no-build

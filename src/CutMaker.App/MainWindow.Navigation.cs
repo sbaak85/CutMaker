@@ -94,12 +94,12 @@ public partial class MainWindow
     {
         if (NavigationGestureActive) return;
         UpdateLayout();
+        UpdateTimelineViewport();
         // Reserve a little room after the final edge. Empty timelines show a useful one-minute overview.
         var duration = PreviewDuration;
         var span = duration > 0 ? duration + Math.Max(1 / _project.Video.Fps, duration * .04) : 60;
         var scale = Math.Min(TimelineZoom.Maximum, TimelineViewportWidth / span);
         if (!double.IsFinite(scale) || scale <= 0) return;
-        TimelineZoom.Minimum = Math.Min(.01, scale);
         TimelineZoom.Value = scale;
         TimelinePixelsPerSecond = scale;
         UpdateTimelineViewport();

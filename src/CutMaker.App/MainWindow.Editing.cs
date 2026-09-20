@@ -43,6 +43,7 @@ public partial class MainWindow
 
     internal void ClearEditHistory()
     {
+        ClearCollapsedTracks();
         EndMarqueeSelection(cancel: true);
         CancelPointerEdit();
         _undo.Clear(); _redo.Clear(); _selectedTrackId = null;
@@ -222,8 +223,8 @@ public partial class MainWindow
         var edge = Math.Min(8, (right - left) / 4);
         var fadeInHandle = Math.Clamp(left + (clip.FadeIn?.Duration ?? 0) * TimelinePixelsPerSecond, left + edge, right - edge);
         var fadeOutHandle = Math.Clamp(right - (clip.FadeOut?.Duration ?? 0) * TimelinePixelsPerSecond, left + edge, right - edge);
-        _pointerMode = point.Y <= 17 && Math.Abs(point.X - fadeInHandle) <= 6 ? PointerEdit.FadeIn
-            : point.Y <= 17 && Math.Abs(point.X - fadeOutHandle) <= 6 ? PointerEdit.FadeOut
+        _pointerMode = point.Y <= lane.FadeHandleHitHeight && Math.Abs(point.X - fadeInHandle) <= 6 ? PointerEdit.FadeIn
+            : point.Y <= lane.FadeHandleHitHeight && Math.Abs(point.X - fadeOutHandle) <= 6 ? PointerEdit.FadeOut
             : Math.Abs(point.X - left) <= edge ? PointerEdit.TrimStart
             : Math.Abs(point.X - right) <= edge ? PointerEdit.TrimEnd : PointerEdit.Move;
         _pointerOriginal = clip; _pointerCandidate = null; _pointerLane = lane; _pointerOrigin = point;

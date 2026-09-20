@@ -27,6 +27,7 @@ public partial class MainWindow
     private bool _previewOpened;
     private bool _previewPlaying;
     private bool _previewPreparing;
+    private bool _previewPlayWhenReady;
     private bool _updatingPreviewSeek;
     private bool _previewScrubbing;
     private bool _resumeAfterPreviewScrub;
@@ -36,7 +37,6 @@ public partial class MainWindow
     private double _previewRangeStart;
     private double _previewRangeEnd;
     private double _previewPlaybackFarthest;
-    private const double PreviewWindowSeconds = 20;
     internal Func<CutProject, string, MediaRenderOptions, CancellationToken, Task> RenderStillMediaAsync { get; set; } =
         async (project, output, options, token) => { await MediaRenderService.RenderAsync(project, null, output, options, cancellationToken: token); };
 
@@ -70,7 +70,7 @@ public partial class MainWindow
         if (!_previewInitialized || _previewShutdown) return;
         PlayheadSeconds = Math.Clamp(PlayheadSeconds, 0, PreviewDuration);
         if (!PreviewIsReady && !_previewPreparing)
-            PreviewHint.Text = PreviewDuration > 0 ? "拖曳時間尺查看目前畫面\n按「播放」準備播放頭後 20 秒的影音" : "將素材放入軌道，開始編輯";
+            PreviewHint.Text = PreviewDuration > 0 ? "拖曳時間尺查看目前畫面\n按「播放」準備從播放頭到結尾的連續預覽" : "將素材放入軌道，開始編輯";
         RefreshPreviewControls();
     }
 
@@ -87,6 +87,7 @@ public partial class MainWindow
         _previewPlaying = false;
         _previewPlaybackFarthest = 0;
         _previewPreparing = false;
+        _previewPlayWhenReady = false;
         _previewScrubbing = false;
         _resumeAfterPreviewScrub = false;
         if (!_previewInitialized || _previewShutdown) return;
@@ -115,9 +116,17 @@ public partial class MainWindow
     }
 
     private async void PreparePreview_Click(object sender, RoutedEventArgs e) => await PreparePreviewAsync();
-    private async void PreviewPlay_Click(object sender, RoutedEventArgs e)
+    private async void PreviewPlay_Click(object sender, RoutedEventArgs e) => await TogglePreviewPlaybackAsync();
+    private async Task TogglePreviewPlaybackAsync()
     {
-        if (_previewPreparing) return;
+        EndPreviewScrub(resumePlayback: false);
+        if (_previewPreparing)
+        {
+            _previewPlayWhenReady = !_previewPlayWhenReady;
+            StatusText.Text = _previewPlayWhenReady ? "預覽完成後將自動播放 · 空白鍵取消待播" : "已取消待播 · 預覽完成後保持暫停";
+            RefreshPreviewControls();
+            return;
+        }
         if (!PreviewIsReady || !PreviewContains(PlayheadSeconds)) { await PreparePreviewAsync(playWhenReady: true); return; }
         if (_previewPlaying) PausePreview();
         else StartPreviewPlayback();
@@ -145,10 +154,12 @@ public partial class MainWindow
         var revision = _previewRevision;
         if (PlayheadSeconds >= PreviewDuration - 0.00001) PlayheadSeconds = 0;
         _previewRangeStart = PlayheadSeconds;
-        _previewRangeEnd = Math.Min(PreviewDuration, _previewRangeStart + PreviewWindowSeconds);
+        // One continuous file/decoder clock: no recurring render or player swap at 20-second boundaries.
+        _previewRangeEnd = PreviewDuration;
         using var cancellation = new CancellationTokenSource();
         _previewCancellation = cancellation;
         _previewPreparing = true;
+        _previewPlayWhenReady = playWhenReady;
         var folder = Path.GetFullPath(Path.Combine(LayoutSettings.DataDirectory, "preview", _previewSessionId));
         var output = Path.Combine(folder, $"preview-{revision}.mp4");
         PreviewHint.Text = "正在產生多軌預覽… 0%";
@@ -189,8 +200,8 @@ public partial class MainWindow
             PreviewPlayer.Pause();
             await _previewOpenCompletion.Task.WaitAsync(TimeSpan.FromSeconds(15), cancellation.Token);
             if (_previewShutdown || revision != _previewRevision) return;
-            StatusText.Text = "播放區間已準備；超出區間會自動更新畫面，播放時準備下一段";
-            if (playWhenReady) StartPreviewPlayback();
+            StatusText.Text = "連續預覽已準備，可播放至結尾；編輯或定位到快取之前需重新準備";
+            if (_previewPlayWhenReady) StartPreviewPlayback();
         }
         catch (OperationCanceledException)
         {
@@ -217,6 +228,7 @@ public partial class MainWindow
             if (!_previewShutdown && revision == _previewRevision)
             {
                 _previewPreparing = false;
+                _previewPlayWhenReady = false;
                 RefreshPreviewControls();
             }
         }
@@ -267,7 +279,7 @@ public partial class MainWindow
         _previewOpenCompletion?.TrySetResult(true);
         RefreshPreviewControls();
     }
-    private async void PreviewPlayer_MediaEnded(object sender, RoutedEventArgs e)
+    private void PreviewPlayer_MediaEnded(object sender, RoutedEventArgs e)
     {
         if (!ReferenceEquals(sender, PreviewPlayer) || !PreviewIsReady || !_previewPlaying || _previewScrubbing) return;
         // Also reject a queued end from an earlier seek of this same player. Use the
@@ -277,10 +289,8 @@ public partial class MainWindow
         // A clock sample from this Play/Seek session can still prove the full tail ran.
         var reached = Math.Max(PreviewPlayer.Position.TotalSeconds, _previewPlaybackFarthest);
         if (Math.Abs(reached - duration) > Math.Min(.12, duration / 4)) return;
-        var continuePlaying = _previewPlaying && _previewRangeEnd < PreviewDuration - 0.00001;
         PausePreview();
         PlayheadSeconds = _previewRangeEnd;
-        if (continuePlaying) await PreparePreviewAsync(playWhenReady: true);
     }
     private void PreviewPlayer_MediaFailed(object? sender, ExceptionRoutedEventArgs e)
     {
@@ -372,7 +382,7 @@ public partial class MainWindow
             PreviewStillImage.Source = bitmap;
             PreviewStillImage.Visibility = Visibility.Visible;
             PreviewHint.Visibility = Visibility.Collapsed;
-            PreviewRangeText.Text = $"目前畫面 {FormatPreviewTime(seconds)} · 播放時處理後續 20 秒";
+            PreviewRangeText.Text = $"目前畫面 {FormatPreviewTime(seconds)} · 播放時準備到結尾的連續預覽";
         }
         catch (OperationCanceledException) { }
         catch (Exception error)
@@ -420,15 +430,16 @@ public partial class MainWindow
     private void BeginPreviewScrub()
     {
         if (_previewScrubbing) return;
+        _previewPlayWhenReady = false;
         _resumeAfterPreviewScrub = _previewPlaying;
         _previewScrubbing = true;
         PausePreview();
     }
-    private void EndPreviewScrub()
+    private void EndPreviewScrub(bool resumePlayback = true)
     {
         if (!_previewScrubbing) return;
         _previewScrubbing = false;
-        var resume = _resumeAfterPreviewScrub;
+        var resume = resumePlayback && _resumeAfterPreviewScrub;
         _resumeAfterPreviewScrub = false;
         if (resume && PreviewIsReady && PreviewContains(PlayheadSeconds)) StartPreviewPlayback();
         else if (resume) _ = PreparePreviewAsync(playWhenReady: true);
@@ -463,8 +474,12 @@ public partial class MainWindow
     {
         if (!_previewInitialized || _previewShutdown) return;
         PreparePreviewButton.IsEnabled = !_previewPreparing && PreviewDuration > 0;
-        PreviewPlayButton.IsEnabled = !_previewPreparing && PreviewDuration > 0;
-        PreviewPlayButton.Content = _previewPlaying ? "暫停" : "播放";
+        PreparePreviewButton.Visibility = _previewPreparing ? Visibility.Collapsed : Visibility.Visible;
+        PreviewPlayButton.IsEnabled = PreviewDuration > 0;
+        PreviewPlayButton.Content = _previewPreparing && _previewPlayWhenReady ? "待播" : _previewPlaying ? "暫停" : "播放";
+        PreviewPlayButton.ToolTip = _previewPreparing
+            ? (_previewPlayWhenReady ? "準備完成後自動播放；空白鍵取消待播" : "按下或空白鍵，準備完成後自動播放")
+            : "播放／暫停 · 空白鍵";
         PreviewStopButton.IsEnabled = PreviewDuration > 0;
         PreviewCancelButton.Visibility = _previewPreparing ? Visibility.Visible : Visibility.Collapsed;
         PreviewCancelButton.IsEnabled = _previewPreparing;
@@ -559,6 +574,9 @@ public partial class MainWindow
                 delayedFailure.TrySetCanceled();
                 RenderStillMediaAsync = originalStillRenderer;
             }
+            await RunTransportSmokeAsync(folder);
+            SeekPreview(0);
+            await PreparePreviewAsync();
             var duration = PreviewDuration;
             var naturalDuration = PreviewPlayer.NaturalDuration.TimeSpan.TotalSeconds;
             var naturalWidth = PreviewPlayer.NaturalVideoWidth;
@@ -613,31 +631,42 @@ public partial class MainWindow
                 throw new InvalidOperationException($"Native preview did not play its complete tail: expected {duration}, max playback {maxPosition}, playhead {PlayheadSeconds}.");
             var visibleClip = _project.Clips.FirstOrDefault(clip => _project.Tracks.Any(track =>
                 track.Id == clip.TrackId && track.Kind == TrackKind.Video && !track.Muted));
-            // Long timelines prepare a bounded window with local media time and a global UI playhead.
+            // One file spans the remainder: a cut at the old 20-second boundary must not swap players.
             var normalProject = _project;
             try
             {
                 _project = _project with
                 {
+                    Video = _project.Video with { Width = 160, Height = 90 },
                     Tracks = [.. _project.Tracks, new("preview-long-muted", "Long muted tail", TrackKind.Video, Muted: true)],
                     MediaAssets = [.. _project.MediaAssets, new("preview-long-muted", Path.Combine(folder, "unused-muted.mp4"), MediaKind.Video, 65)],
                     Clips = [.. _project.Clips, new("preview-long-muted", "preview-long-muted", "preview-long-muted", 0, 0, 65)]
                 };
                 InvalidatePreview(); SeekPreview(21.25);
                 await PreparePreviewAsync();
-                if (!PreviewIsReady || Math.Abs(_previewRangeStart - 21.25) > 1e-8 || Math.Abs(_previewRangeEnd - 41.25) > 1e-8)
-                    throw new InvalidOperationException($"Long-project playback window was not bounded: {_previewRangeStart} - {_previewRangeEnd}; {PreviewHint.Text}");
+                if (!PreviewIsReady || Math.Abs(_previewRangeStart - 21.25) > 1e-8 || Math.Abs(_previewRangeEnd - 65) > 1e-8)
+                    throw new InvalidOperationException($"Continuous preview did not reach the project end: {_previewRangeStart} - {_previewRangeEnd}; {PreviewHint.Text}");
                 using var rangeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                var boundedDuration = await MediaProbe.ReadContainerDurationAsync(_previewFile!, rangeTimeout.Token);
-                if (Math.Abs(boundedDuration - PreviewWindowSeconds) > .05)
-                    throw new InvalidOperationException($"Bounded preview encoded {boundedDuration}s instead of {PreviewWindowSeconds}s.");
+                var continuousDuration = await MediaProbe.ReadContainerDurationAsync(_previewFile!, rangeTimeout.Token);
+                if (Math.Abs(continuousDuration - 43.75) > .05)
+                    throw new InvalidOperationException($"Continuous preview encoded {continuousDuration}s instead of 43.75s.");
                 SeekPreview(22.25);
                 await Task.Delay(150);
                 if (Math.Abs(PreviewPlayer.Position.TotalSeconds - 1) > .12)
                     throw new InvalidOperationException("Global playback seek was not translated into local preview-window time.");
                 StartPreviewPlayback(); await Task.Delay(500); PausePreview();
                 if (PlayheadSeconds < 22.35 || PlayheadSeconds > 23.25)
-                    throw new InvalidOperationException($"Bounded preview lost its global playhead offset: {PlayheadSeconds}.");
+                    throw new InvalidOperationException($"Continuous preview lost its global playhead offset: {PlayheadSeconds}.");
+                var continuousPlayer = PreviewPlayer;
+                var continuousFile = _previewFile;
+                SeekPreview(40.95);
+                StartPreviewPlayback();
+                var continuityDeadline = DateTime.UtcNow.AddSeconds(5);
+                while (PlayheadSeconds < 41.65 && DateTime.UtcNow < continuityDeadline) await Task.Delay(50);
+                if (!_previewPlaying || _previewPreparing || !ReferenceEquals(continuousPlayer, PreviewPlayer) ||
+                    _previewFile != continuousFile || PlayheadSeconds < 41.65)
+                    throw new InvalidOperationException("Playback stopped or swapped players at the former 20-second boundary.");
+                PausePreview();
             }
             finally { _project = normalProject; InvalidatePreview(); }
             RunOutputSettingsSmoke(folder);
@@ -646,7 +675,7 @@ public partial class MainWindow
             File.WriteAllLines(Path.Combine(folder, "preview-result.txt"),
             [
                 "PASS: stale render/frame cancellation, immediate seek and EOF still frames, rendered MP4 MediaOpened, precise FFprobe duration, native seek, fractional tail seek, full playback to end and playhead update.",
-                "PASS: a 65-second timeline renders only the requested 20-second window, with correct global-to-local seek and playback offsets.",
+                "PASS: a 65-second timeline prepares one continuous file from the playhead to the end; native playback crosses the old 20-second boundary without stopping or swapping players, retaining global-to-local offsets.",
                 "PASS: Stop cancels pending auto-play even inside its prepared range; canceled late frame errors cannot replace cached playback state.",
                 "PASS: paused, early and old-source MediaEnded plus duplicate/stale MediaOpened events cannot reset the current native playback clock.",
                 $"Timeline duration {duration:0.000}s; encoded duration {encodedDuration:0.000}s; Windows NaturalDuration reports {naturalDuration:0.000}s.",

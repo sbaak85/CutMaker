@@ -8,6 +8,15 @@ try
 {
 var folder = Path.GetFullPath(args.FirstOrDefault() ?? Path.Combine("runtime", "render-checks"));
 Directory.CreateDirectory(folder);
+if (args.Contains("--audio-only"))
+{
+    await AudioContinuityChecks.Run(Path.Combine(folder, "audio-continuity"), (condition, message) =>
+    {
+        if (!condition) throw new InvalidOperationException(message);
+        Console.WriteLine("PASS: " + message);
+    });
+    return;
+}
 var ffmpeg = MediaRenderService.FindTool("ffmpeg.exe");
 var ffprobe = MediaRenderService.FindTool("ffprobe.exe");
 var notes = new List<string>();
@@ -202,6 +211,7 @@ using (var cancellation = new CancellationTokenSource())
     Check(!Directory.EnumerateFiles(folder, ".cutmaker-*").Any(), "render temporary media and filter files cleaned after cancellation");
 }
 Check(hashes.All(pair => SHA256.HashData(File.ReadAllBytes(pair.Key)).SequenceEqual(pair.Value)), "source hashes remain unchanged after canceled render");
+await AudioContinuityChecks.Run(Path.Combine(folder, "audio-continuity"), Check);
 await File.WriteAllLinesAsync(Path.Combine(folder, "render-result.txt"), notes);
 Console.WriteLine($"{notes.Count}/{notes.Count} render integration checks passed. Artifacts: {folder}");
 

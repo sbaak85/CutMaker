@@ -18,6 +18,7 @@ public partial class MainWindow
     private string? _assetDragId;
     private bool _draggingFromLibrary;
     private long _lastDragScroll;
+    private bool _updatingTimelineViewport;
 
     public static readonly DependencyProperty TimelinePixelsPerSecondProperty = DependencyProperty.Register(
         nameof(TimelinePixelsPerSecond), typeof(double), typeof(MainWindow), new PropertyMetadata(40.0));
@@ -31,6 +32,7 @@ public partial class MainWindow
 
     private void RefreshTimeline()
     {
+        PruneCollapsedTracks();
         var focusedTrack = (Keyboard.FocusedElement as TimelineLane)?.Tag as string;
         if (SelectedTimelineClipId is not null && !_project.Clips.Any(clip => clip.Id == SelectedTimelineClipId)) SelectedTimelineClipId = null;
         NormalizeClipSelection();
@@ -38,6 +40,14 @@ public partial class MainWindow
         TrackItems.ItemsSource = _project.Tracks.Select(track => new
         {
             track.Id, track.Name, IsLocked = track.Locked,
+            IsCollapsed = IsTrackCollapsed(track.Id),
+            RowHeight = IsTrackCollapsed(track.Id) ? 30d : 86d,
+            CollapseGlyph = IsTrackCollapsed(track.Id) ? "▸" : "▾",
+            CollapseToolTip = IsTrackCollapsed(track.Id) ? "展開軌道" : "收折軌道",
+            IsAudio = track.Kind == TrackKind.Audio,
+            IsMuted = track.Muted,
+            MuteToolTip = track.Muted ? "解除此軌道靜音" : "靜音此軌道",
+            DetailVisibility = IsTrackCollapsed(track.Id) ? Visibility.Collapsed : Visibility.Visible,
             TrackDetail = $"{(track.Muted ? "靜音" : $"音量 {track.Volume * 100:0}%")}{(track.Locked ? " · 鎖定" : "")}",
             Symbol = track.Kind == TrackKind.Video ? "V" : "A",
             Clips = (IReadOnlyList<TimelineClipView>)_project.Clips.Where(clip => clip.TrackId == track.Id).OrderBy(clip => clip.Start)
@@ -74,6 +84,7 @@ public partial class MainWindow
             pointerX < 0 || pointerX > TimelineViewportWidth) return false;
         // Keep captured trim/move/scrub coordinates stable until the current gesture ends.
         if (_pointerOriginal is not null || IsMarqueeSelecting || _draggingFromLibrary || _previewScrubbing) return true;
+        UpdateTimelineViewport();
         var oldScale = TimelinePixelsPerSecond;
         var anchorTime = TimelineOffsetSeconds + pointerX / oldScale;
         var scale = Math.Clamp(oldScale * Math.Pow(1.2, Math.Clamp(delta / 120.0, -20, 20)),
@@ -98,15 +109,29 @@ public partial class MainWindow
     private void TimelineContent_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateTimelineViewport();
     private void UpdateTimelineViewport()
     {
-        if (TimelineContent is null || TimelineHorizontalScroll is null || TimelineContent.ActualWidth <= 0) return;
-        var visibleSeconds = TimelineViewportWidth / TimelinePixelsPerSecond;
-        var end = _project.Clips.Count > 0 ? _project.Clips.Max(clip => clip.End) : 0;
-        // Rendering is viewport-based. Even long media does not allocate a giant canvas.
-        var length = Math.Max(60, end + 30);
-        TimelineHorizontalScroll.Maximum = Math.Max(0, length - visibleSeconds);
-        TimelineHorizontalScroll.ViewportSize = visibleSeconds;
-        TimelineHorizontalScroll.LargeChange = Math.Max(1, visibleSeconds * 0.8);
-        TimelineOffsetSeconds = Math.Clamp(TimelineOffsetSeconds, 0, TimelineHorizontalScroll.Maximum);
+        if (_updatingTimelineViewport || TimelineContent is null || TimelineHorizontalScroll is null || TimelineZoom is null ||
+            TimelineContent.ActualWidth <= 0) return;
+        _updatingTimelineViewport = true;
+        try
+        {
+            var end = _project.Clips.Count > 0 ? _project.Clips.Max(clip => clip.End) : 0;
+            // The entire project can occupy one quarter of the available lane width. Keep the
+            // old 10 px/s lower bound as a ceiling so very short clips still allow useful zooming.
+            // Empty projects use one minute as their overview span; long projects have no fixed floor.
+            var minimum = Math.Min(10, TimelineViewportWidth * .25 / (end > 0 ? end : 60));
+            var scale = Math.Clamp(TimelinePixelsPerSecond, minimum, TimelineZoom.Maximum);
+            TimelineZoom.Minimum = minimum;
+            TimelineZoom.Value = scale;
+            TimelinePixelsPerSecond = scale;
+            var visibleSeconds = TimelineViewportWidth / scale;
+            // Rendering is viewport-based. Even long media does not allocate a giant canvas.
+            var length = Math.Max(60, end + 30);
+            TimelineHorizontalScroll.Maximum = Math.Max(0, length - visibleSeconds);
+            TimelineHorizontalScroll.ViewportSize = visibleSeconds;
+            TimelineHorizontalScroll.LargeChange = Math.Max(1, visibleSeconds * 0.8);
+            TimelineOffsetSeconds = Math.Clamp(TimelineOffsetSeconds, 0, TimelineHorizontalScroll.Maximum);
+        }
+        finally { _updatingTimelineViewport = false; }
     }
 
     private void AssetGrid_MouseDown(object sender, MouseButtonEventArgs e)

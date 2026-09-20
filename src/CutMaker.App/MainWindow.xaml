@@ -5,6 +5,38 @@
         Title="CutMaker" Width="1440" Height="920" MinWidth="1000" MinHeight="720"
         FontFamily="Microsoft JhengHei UI, Segoe UI" FontSize="13" Foreground="#EAF0FA" Background="#11151D"
         WindowStartupLocation="CenterScreen" Closing="Window_Closing">
+    <Window.Resources>
+        <Style x:Key="TrackCollapseButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Width" Value="24" /><Setter Property="Height" Value="24" />
+            <Setter Property="Padding" Value="0" /><Setter Property="Margin" Value="0,3,0,0" />
+            <Setter Property="FontSize" Value="17" /><Setter Property="Foreground" Value="#FFD56A" />
+            <Setter Property="Background" Value="Transparent" /><Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+        </Style>
+        <Style x:Key="TrackMuteButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Width" Value="50" /><Setter Property="Height" Value="22" />
+            <Setter Property="Padding" Value="3,0" /><Setter Property="Margin" Value="6,0,0,0" />
+            <Setter Property="FontSize" Value="10" /><Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="VerticalAlignment" Value="Center" /><Setter Property="Foreground" Value="#B5C3D8" />
+            <Setter Property="Template">
+                <Setter.Value><ControlTemplate TargetType="Button">
+                    <Border x:Name="MuteBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="3">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="MuteBorder" Property="BorderBrush" Value="#78DCCB" /></Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="MuteBorder" Property="BorderBrush" Value="#78DCCB" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate></Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsAudio}" Value="False"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                <DataTrigger Binding="{Binding IsMuted}" Value="True">
+                    <Setter Property="Background" Value="#743C47" /><Setter Property="Foreground" Value="#FFE2E5" /><Setter Property="BorderBrush" Value="#F18C9B" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
     <Grid x:Name="RootLayout" Margin="16" Background="#11151D">
         <Grid.RowDefinitions>
             <RowDefinition Height="58" />
@@ -21,7 +53,7 @@
                 <TextBlock Text="CutMaker" FontSize="25" FontWeight="SemiBold" VerticalAlignment="Center" />
                 <TextBlock Text="專注每一段畫面與聲音" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="18,0,0,0" />
             </StackPanel>
-            <TextBlock Grid.Column="1" Text="0.4 · 操作便利更新" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="0.5 · 連續音訊與精簡軌道" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
         </Grid>
         <WrapPanel x:Name="ProjectToolbar" Grid.Row="1">
             <Button Content="新增專案" Click="New_Click" ToolTip="Ctrl+N" />
@@ -241,7 +273,7 @@
                     <TextBlock x:Name="TrackCount" DockPanel.Dock="Right" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" />
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,18,0">
                         <TextBlock Text="縮放" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
-                        <Slider x:Name="TimelineZoom" Width="100" Minimum="10" Maximum="120" Value="40" ValueChanged="TimelineZoom_Changed" VerticalAlignment="Center" ToolTip="調整時間軸水平比例；也可在軌道或時間尺上按 Ctrl＋滾輪縮放" />
+                        <Slider x:Name="TimelineZoom" Width="100" Minimum="10" Maximum="120" Value="40" ValueChanged="TimelineZoom_Changed" VerticalAlignment="Center" ToolTip="Ctrl＋滾輪縮放；最小可讓整段素材縮至可視軌道的 25%" />
                     </StackPanel>
                 </WrapPanel>
                 <Grid Grid.Row="1" Margin="0,8,0,0">
@@ -255,12 +287,23 @@
                 <ScrollViewer x:Name="TimelineTrackScroll" Grid.ColumnSpan="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="TimelineTrackScroll_Changed">
                     <ItemsControl x:Name="TrackItems">
                         <ItemsControl.ItemTemplate><DataTemplate>
-                            <Grid Margin="0,0,0,6" MinHeight="86">
+                            <Grid Margin="0,0,0,6" Height="{Binding RowHeight}">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="{Binding TrackHeaderWidth, RelativeSource={RelativeSource AncestorType=Window}}" /><ColumnDefinition Width="8" /><ColumnDefinition /></Grid.ColumnDefinitions>
-                                <Border Background="#253247" CornerRadius="4,0,0,4" Padding="12" Tag="{Binding Id}" MouseLeftButtonDown="TimelineTrack_MouseDown">
-                                    <DockPanel><TextBlock Text="{Binding Symbol}" Foreground="#78DCCB" VerticalAlignment="Center" Margin="0,0,12,0" /><StackPanel VerticalAlignment="Center"><TextBlock Text="{Binding Name}" TextWrapping="Wrap" ToolTip="{Binding Name}" /><TextBlock Text="{Binding TrackDetail}" FontSize="11" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" /></StackPanel></DockPanel>
+                                <Border Background="#253247" CornerRadius="4,0,0,4" Padding="4,0,6,0" Tag="{Binding Id}" MouseLeftButtonDown="TimelineTrack_MouseDown">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="24" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <Button x:Name="CollapseTrackButton" Style="{StaticResource TrackCollapseButton}" Content="{Binding CollapseGlyph}" Tag="{Binding Id}" ToolTip="{Binding CollapseToolTip}" AutomationProperties.Name="{Binding CollapseToolTip}" Click="CollapseTrack_Click" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="4,0,0,0">
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="18" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Symbol}" Foreground="#78DCCB" VerticalAlignment="Center" FontSize="11" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" VerticalAlignment="Center" />
+                                            </Grid>
+                                            <TextBlock Text="{Binding TrackDetail}" FontSize="11" Foreground="{StaticResource MutedBrush}" Margin="18,4,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding TrackDetail}" Visibility="{Binding DetailVisibility}" />
+                                        </StackPanel>
+                                        <Button x:Name="MuteTrackButton" Grid.Column="2" Style="{StaticResource TrackMuteButton}" Content="MUTE" Tag="{Binding Id}" ToolTip="{Binding MuteToolTip}" AutomationProperties.Name="{Binding MuteToolTip}" Click="MuteTrack_Click" />
+                                    </Grid>
                                 </Border>
-                                <local:TimelineLane Grid.Column="2" MinHeight="86" Tag="{Binding Id}" Clips="{Binding Clips}" IsLocked="{Binding IsLocked}"
+                                <local:TimelineLane Grid.Column="2" Tag="{Binding Id}" Clips="{Binding Clips}" IsLocked="{Binding IsLocked}" IsCompact="{Binding IsCollapsed}"
                                                     PixelsPerSecond="{Binding TimelinePixelsPerSecond, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     OffsetSeconds="{Binding TimelineOffsetSeconds, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     SelectedClipId="{Binding SelectedTimelineClipId, RelativeSource={RelativeSource AncestorType=Window}}"

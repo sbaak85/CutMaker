@@ -37,7 +37,7 @@ public partial class MainWindow : Window
         Loaded += (_, _) => ClampPanels();
         SizeChanged += (_, _) => ClampPanels();
         ProjectToolbar.SizeChanged += (_, _) => ClampPanels();
-        PreviewKeyDown += HandleShortcut;
+        AddHandler(Keyboard.PreviewKeyDownEvent, new KeyEventHandler(HandleShortcut), true);
         PreviewMouseLeftButtonDown += (_, _) => ResetLibraryDragCandidate();
         PreviewMouseLeftButtonUp += (_, _) => ResetLibraryDragCandidate();
         Deactivated += (_, _) => ResetLibraryDragCandidate();
@@ -182,6 +182,8 @@ public partial class MainWindow : Window
     {
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         var modifiers = Keyboard.Modifiers;
+        if (TryHandleTransportKey(key, modifiers, e.OriginalSource as DependencyObject ?? Keyboard.FocusedElement as DependencyObject, e.IsRepeat))
+        { e.Handled = true; return; }
         var timelineFocus = Keyboard.FocusedElement is TimelineLane or TimelineRuler;
         if (key == Key.Escape && modifiers == ModifierKeys.None)
         {
@@ -211,9 +213,6 @@ public partial class MainWindow : Window
             if (key == Key.Delete && modifiers == ModifierKeys.Shift)
             { DeleteSelectedClips(true); e.Handled = true; return; }
         }
-        if (key == Key.Space && modifiers == ModifierKeys.None &&
-            Keyboard.FocusedElement is not TextBoxBase and not ButtonBase and not ComboBox and not MenuItem)
-        { PreviewPlay_Click(this, e); e.Handled = true; return; }
         if (key == Key.Delete && modifiers == ModifierKeys.None &&
             (timelineFocus || ReferenceEquals(Keyboard.FocusedElement, RemoveClipButton)))
         { RemoveSelectedClip(); e.Handled = true; return; }
@@ -302,7 +301,8 @@ public partial class MainWindow : Window
         finally { _clamping = false; }
     }
 
-    private void TrackHeader_DragDelta(object sender, DragDeltaEventArgs e) => TrackHeaderWidth = TrackHeaderColumn.ActualWidth;
+    private void TrackHeader_DragDelta(object sender, DragDeltaEventArgs e)
+    { TrackHeaderWidth = TrackHeaderColumn.ActualWidth; UpdateTimelineViewport(); }
     private void Splitter_DragCompleted(object sender, DragCompletedEventArgs e)
     {
         ClampPanels();
