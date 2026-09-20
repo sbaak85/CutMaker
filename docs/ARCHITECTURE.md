@@ -34,6 +34,8 @@ Seek requests debounce for 110 ms, cancel previous work and produce one composit
 
 Space is routed before stale pointer-state guards, finalizes released scrub/edit gestures and shares the play button's async toggle. During preparation it updates pending autoplay intent instead of discarding input. Auto-repeat is ignored; text, choices, menus and ordinary buttons retain native Space behavior. Track collapse is view-only session state (30 px compact rows), with matching draw and hit-test geometry. Audio MUTE uses the existing persisted/undoable Track.Muted flag and invalidates old preview audio immediately.
 
+Keyboard routing unwraps both SystemKey and ImeProcessedKey before applying control-specific guards. Custom timeline FrameworkElements default to IME enabled, unlike WPF ButtonBase; they and the preview focus/seek surfaces explicitly disable IME. Text fields remain enabled. The regression uses WPF's MarkImeProcessed event representation and routes it through the real window handler, checking actual native playback advancement and text-input isolation. This catches the TSF preprocessing path missed by a synthetic plain Key.Space event; it is not a physical keyboard/IME-session test.
+
 `MediaVisualCache` generates 160x90 source thumbnails and a 1024-bin waveform from streamed PCM, with fixed decode buffers, two concurrent workers and bounded time/cache size. Keys include absolute path, file metadata and asset duration. Frozen images return to the UI. Updating a lane's draw data preserves bindings, mouse capture and in-progress inspector edits. Waveforms use source coordinates and do not include clip gain/fades.
 
 ## Persistence and recovery

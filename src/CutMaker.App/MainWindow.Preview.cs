@@ -574,6 +574,7 @@ public partial class MainWindow
                 delayedFailure.TrySetCanceled();
                 RenderStillMediaAsync = originalStillRenderer;
             }
+            await RunImeTransportSmokeAsync(folder);
             await RunTransportSmokeAsync(folder);
             SeekPreview(0);
             await PreparePreviewAsync();

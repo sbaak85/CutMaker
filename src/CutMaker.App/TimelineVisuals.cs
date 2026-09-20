@@ -60,6 +60,7 @@ public sealed class TimelineLane : FrameworkElement
     public TimelineLane()
     {
         Focusable = true;
+        InputMethod.SetIsInputMethodEnabled(this, false);
         ClipToBounds = true;
         SnapsToDevicePixels = true;
         UseLayoutRounding = true;
@@ -289,6 +290,7 @@ public sealed class TimelineRuler : FrameworkElement
     public TimelineRuler()
     {
         Focusable = true;
+        InputMethod.SetIsInputMethodEnabled(this, false);
         ClipToBounds = true;
         SnapsToDevicePixels = true;
         UseLayoutRounding = true;

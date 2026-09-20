@@ -180,7 +180,14 @@ public partial class MainWindow : Window
 
     private void HandleShortcut(object sender, KeyEventArgs e)
     {
-        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        // TSF may wrap Space before PreviewKeyDown when a Chinese IME owns focus.
+        // Keep the underlying key, then apply the normal text/control-specific guards.
+        var key = e.Key switch
+        {
+            Key.System => e.SystemKey,
+            Key.ImeProcessed => e.ImeProcessedKey,
+            _ => e.Key
+        };
         var modifiers = Keyboard.Modifiers;
         if (TryHandleTransportKey(key, modifiers, e.OriginalSource as DependencyObject ?? Keyboard.FocusedElement as DependencyObject, e.IsRepeat))
         { e.Handled = true; return; }
