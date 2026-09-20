@@ -26,7 +26,8 @@ var checks = new (string Name, Action Run)[]
     ("Timeline positions round to frames without changing source durations", PlacementFrames),
     ("Moving clips preserves source timing and enforces source/target locks", EditingMoves),
     ("Trim and inspector edits reject overlap and invalid source/fade/gain ranges", EditingBounds),
-    ("Recovery snapshots preserve sources, isolate sessions and survive cancellation", RecoveryChecks.Run)
+    ("Recovery snapshots preserve sources, isolate sessions and survive cancellation", RecoveryChecks.Run),
+    ("Group moves preserve type-relative tracks and reject invalid plans atomically", GroupMoveChecks.Run)
 };
 var failures = 0;
 foreach (var (name, run) in checks)

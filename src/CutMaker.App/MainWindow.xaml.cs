@@ -180,45 +180,63 @@ public partial class MainWindow : Window
 
     private void HandleShortcut(object sender, KeyEventArgs e)
     {
-        if (Keyboard.Modifiers == ModifierKeys.Control && Keyboard.FocusedElement is TimelineLane)
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        var modifiers = Keyboard.Modifiers;
+        var timelineFocus = Keyboard.FocusedElement is TimelineLane or TimelineRuler;
+        if (key == Key.Escape && modifiers == ModifierKeys.None)
         {
-            switch (e.Key)
+            if (IsMarqueeSelecting) { EndMarqueeSelection(cancel: true); e.Handled = true; return; }
+            if (_pointerOriginal is not null) { CancelPointerEdit(); StatusText.Text = "已取消拖曳"; e.Handled = true; return; }
+            if (timelineFocus) { ClearSelection_Click(this, e); e.Handled = true; return; }
+        }
+        if (IsMarqueeSelecting || _pointerOriginal is not null) { e.Handled = true; return; }
+        var navigationFocus = timelineFocus || (PreviewPane.IsKeyboardFocusWithin &&
+            Keyboard.FocusedElement is not TextBoxBase and not ComboBox and not Slider);
+        if (navigationFocus && TryHandleNavigationShortcut(key, modifiers)) { e.Handled = true; return; }
+        if (timelineFocus)
+        {
+            if (modifiers == ModifierKeys.Control)
             {
-                case Key.A: SelectAllClips_Click(this, e); break;
-                case Key.C: CopySelectedClips(); break;
-                case Key.V: PasteClips(PlayheadSeconds); break;
-                case Key.D: DuplicateClips_Click(this, e); break;
-                default: goto StandardShortcuts;
+                switch (key)
+                {
+                    case Key.A: SelectAllClips_Click(this, e); e.Handled = true; return;
+                    case Key.C: CopySelectedClips(); e.Handled = true; return;
+                    case Key.X: CutClips_Click(this, e); e.Handled = true; return;
+                    case Key.V: PasteClips(PlayheadSeconds); e.Handled = true; return;
+                    case Key.D: DuplicateClips_Click(this, e); e.Handled = true; return;
+                }
             }
-            e.Handled = true; return;
+            if (key == Key.S && modifiers == ModifierKeys.None)
+            { SetTimelineSnapping(!TimelineSnapEnabled); e.Handled = true; return; }
+            if (key == Key.Delete && modifiers == ModifierKeys.Shift)
+            { DeleteSelectedClips(true); e.Handled = true; return; }
         }
-        StandardShortcuts:
-        if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.None &&
-            Keyboard.FocusedElement is not TextBox and not ButtonBase and not ComboBox)
+        if (key == Key.Space && modifiers == ModifierKeys.None &&
+            Keyboard.FocusedElement is not TextBoxBase and not ButtonBase and not ComboBox and not MenuItem)
+        { PreviewPlay_Click(this, e); e.Handled = true; return; }
+        if (key == Key.Delete && modifiers == ModifierKeys.None &&
+            (timelineFocus || ReferenceEquals(Keyboard.FocusedElement, RemoveClipButton)))
+        { RemoveSelectedClip(); e.Handled = true; return; }
+        if (modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
         {
-            PreviewPlay_Click(this, e); e.Handled = true; return;
-        }
-        if (e.Key == Key.Delete && Keyboard.Modifiers == ModifierKeys.None &&
-            (Keyboard.FocusedElement is TimelineLane || ReferenceEquals(Keyboard.FocusedElement, RemoveClipButton)))
-        {
-            if (SelectedTimelineClipId is not null) { RemoveSelectedClip(); e.Handled = true; }
+            if (key == Key.S) { SaveProject(true); e.Handled = true; }
+            else if (key == Key.Z && Keyboard.FocusedElement is not TextBoxBase) { RedoEdit(); e.Handled = true; }
             return;
         }
-        if (Keyboard.Modifiers != ModifierKeys.Control) return;
-        switch (e.Key)
+        if (modifiers != ModifierKeys.Control) return;
+        switch (key)
         {
             case Key.N: New_Click(this, e); break;
             case Key.O: Open_Click(this, e); break;
             case Key.S: SaveProject(false); break;
             case Key.I: ImportFiles_Click(this, e); break;
-            case Key.B: SplitClip_Click(this, e); break;
-            case Key.Z when Keyboard.FocusedElement is not TextBox: Undo_Click(this, e); break;
-            case Key.Y when Keyboard.FocusedElement is not TextBox: Redo_Click(this, e); break;
+            case Key.B when Keyboard.FocusedElement is not TextBoxBase: SplitClip_Click(this, e); break;
+            case Key.Z when Keyboard.FocusedElement is not TextBoxBase: Undo_Click(this, e); break;
+            case Key.Y when Keyboard.FocusedElement is not TextBoxBase: Redo_Click(this, e); break;
             default: return;
         }
         e.Handled = true;
     }
-
     internal void ApplyLayout(LayoutSettings layout)
     {
         var workArea = SystemParameters.WorkArea;

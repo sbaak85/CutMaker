@@ -21,7 +21,7 @@
                 <TextBlock Text="CutMaker" FontSize="25" FontWeight="SemiBold" VerticalAlignment="Center" />
                 <TextBlock Text="專注每一段畫面與聲音" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="18,0,0,0" />
             </StackPanel>
-            <TextBlock Grid.Column="1" Text="0.3 · 輕量剪輯版" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="0.4 · 操作便利更新" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
         </Grid>
         <WrapPanel x:Name="ProjectToolbar" Grid.Row="1">
             <Button Content="新增專案" Click="New_Click" ToolTip="Ctrl+N" />
@@ -101,11 +101,11 @@
                 </Grid>
             </Border>
             <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Center" VerticalAlignment="Stretch" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" AutomationProperties.Name="調整素材庫與預覽寬度" DragCompleted="Splitter_DragCompleted" />
-            <Border Grid.Column="2" Background="{StaticResource PanelBrush}" CornerRadius="6" Padding="14">
+            <Border x:Name="PreviewPane" Grid.Column="2" Background="{StaticResource PanelBrush}" CornerRadius="6" Padding="14" Focusable="True">
                 <Grid>
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                     <DockPanel><TextBlock Text="預覽" FontSize="16" FontWeight="SemiBold" /><TextBlock x:Name="PreviewFormat" Text="1920 × 1080 · 30 fps" HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}" /></DockPanel>
-                    <Border Grid.Row="1" Background="#090D13" Margin="0,10,0,8" CornerRadius="4" MinHeight="32">
+                    <Border x:Name="PreviewSurface" Grid.Row="1" Background="#090D13" Margin="0,10,0,8" CornerRadius="4" MinHeight="32" MouseLeftButtonDown="PreviewSurface_MouseDown">
                         <Grid>
                             <MediaElement x:Name="PreviewPlayer" LoadedBehavior="Manual" UnloadedBehavior="Manual" Stretch="Uniform"
                                           MediaOpened="PreviewPlayer_MediaOpened" MediaEnded="PreviewPlayer_MediaEnded" MediaFailed="PreviewPlayer_MediaFailed" />
@@ -117,9 +117,11 @@
                         <Slider x:Name="PreviewSeekSlider" Minimum="0" Maximum="1" ValueChanged="PreviewSeek_ValueChanged" IsMoveToPointEnabled="True"
                                 PreviewMouseLeftButtonDown="PreviewSeek_PointerDown" PreviewMouseLeftButtonUp="PreviewSeek_PointerUp" ToolTip="拖曳試看／定位播放頭" />
                         <WrapPanel HorizontalAlignment="Center" Margin="0,6,0,0">
-                            <Button x:Name="PreparePreviewButton" Content="更新預覽" Click="PreparePreview_Click" Padding="8,5" />
+                            <Button x:Name="PreparePreviewButton" Content="更新" Click="PreparePreview_Click" Padding="8,5" ToolTip="從播放頭更新預覽" />
+                            <Button Content="‹" Click="FrameBack_Click" Padding="8,5" ToolTip="前一格 · ←" AutomationProperties.Name="前一格" />
                             <Button x:Name="PreviewPlayButton" Content="播放" Click="PreviewPlay_Click" Padding="8,5" ToolTip="Space" />
                             <Button x:Name="PreviewStopButton" Content="停止" Click="PreviewStop_Click" Padding="8,5" />
+                            <Button Content="›" Click="FrameForward_Click" Padding="8,5" ToolTip="後一格 · →" AutomationProperties.Name="後一格" />
                             <Button x:Name="PreviewCancelButton" Content="取消" Click="CancelPreview_Click" Visibility="Collapsed" Padding="8,5" />
                         </WrapPanel>
                         <TextBlock x:Name="PreviewTimeText" Text="00:00.000" FontFamily="Consolas" FontSize="14" HorizontalAlignment="Center" Foreground="#78DCCB" Margin="0,5,0,0" />
@@ -213,13 +215,27 @@
                         <MenuItem Header="編輯 ▾" Padding="8,7" Background="#253247" Foreground="#EAF0FA">
                             <MenuItem.Resources><Style TargetType="MenuItem"><Setter Property="Foreground" Value="#17202E" /></Style></MenuItem.Resources>
                             <MenuItem Header="全選片段" InputGestureText="Ctrl+A" Click="SelectAllClips_Click" />
+                            <MenuItem Header="取消選取" InputGestureText="Esc" Click="ClearSelection_Click" />
+                            <MenuItem Header="剪下" InputGestureText="Ctrl+X" Click="CutClips_Click" />
                             <MenuItem Header="複製" InputGestureText="Ctrl+C" Click="CopyClips_Click" />
                             <MenuItem Header="貼到播放頭" InputGestureText="Ctrl+V" Click="PasteClips_Click" />
                             <MenuItem Header="複製到尾端" InputGestureText="Ctrl+D" Click="DuplicateClips_Click" />
                             <Separator />
-                            <MenuItem Header="同軌波紋刪除" Click="RippleDelete_Click" ToolTip="刪除選取片段，將同軌後續片段前移相同長度" />
+                            <MenuItem Header="同軌波紋刪除" InputGestureText="Shift+Delete" Click="RippleDelete_Click" ToolTip="刪除選取片段，將同軌後續片段前移相同長度" />
                             <MenuItem Header="分離音訊並連動" Click="ExtractAudio_Click" />
                             <MenuItem Header="解除連動" Click="UnlinkClips_Click" />
+                            <Separator />
+                            <MenuItem x:Name="SnapMenuItem" Header="吸附片段邊界" IsCheckable="True" IsChecked="True" InputGestureText="S" Click="SnapTimeline_Click" ToolTip="拖曳時按住 Alt 可暫時停用吸附" />
+                            <MenuItem Header="顯示整條時間軸" InputGestureText="Ctrl+0" Click="FitTimeline_Click" />
+                            <MenuItem Header="定位">
+                                <MenuItem Header="前一格" InputGestureText="←" Click="FrameBack_Click" />
+                                <MenuItem Header="後一格" InputGestureText="→" Click="FrameForward_Click" />
+                                <MenuItem Header="前一個片段邊界" InputGestureText="Alt+←" Click="PreviousBoundary_Click" />
+                                <MenuItem Header="下一個片段邊界" InputGestureText="Alt+→" Click="NextBoundary_Click" />
+                                <MenuItem Header="選取範圍起點" Click="SelectedStart_Click" />
+                                <MenuItem Header="選取範圍終點" Click="SelectedEnd_Click" />
+                                <MenuItem Header="跳至時間…" InputGestureText="Ctrl+G" Click="GoToTime_Click" />
+                            </MenuItem>
                         </MenuItem>
                     </Menu>
                     <TextBlock x:Name="TrackCount" DockPanel.Dock="Right" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" />
@@ -252,16 +268,19 @@
                                                     PlayheadSeconds="{Binding PlayheadSeconds, RelativeSource={RelativeSource AncestorType=Window}}"
                                                     AllowDrop="True" PreviewDragEnter="TimelineLane_DragOver" PreviewDragOver="TimelineLane_DragOver"
                                                     PreviewDragLeave="TimelineLane_DragLeave" PreviewDrop="TimelineLane_Drop" MouseLeftButtonDown="TimelineLane_MouseDown"
-                                                    MouseMove="TimelineLane_MouseMove" MouseLeftButtonUp="TimelineLane_MouseUp" LostMouseCapture="TimelineLane_LostCapture" />
+                                                    MouseMove="TimelineLane_MouseMove" MouseLeftButtonUp="TimelineLane_MouseUp" LostMouseCapture="TimelineLane_LostCapture" PreviewMouseRightButtonDown="TimelineLane_RightClick" />
                             </Grid>
                         </DataTemplate></ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
                     <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Center" VerticalAlignment="Stretch" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" DragDelta="TrackHeader_DragDelta" DragCompleted="Splitter_DragCompleted" AutomationProperties.Name="調整軌道名稱寬度" />
+                    <Canvas Grid.ColumnSpan="3" IsHitTestVisible="False" ClipToBounds="True">
+                        <Rectangle x:Name="TimelineMarqueeRect" Visibility="Collapsed" Fill="#2878DCCB" Stroke="#78DCCB" StrokeThickness="1" />
+                    </Canvas>
                 </Grid>
                 <Grid Grid.Row="3">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="{Binding TrackHeaderWidth, RelativeSource={RelativeSource AncestorType=Window}}" /><ColumnDefinition Width="8" /><ColumnDefinition /></Grid.ColumnDefinitions>
-                    <TextBlock Text="拖移片段 · 拖兩端修剪 · Ctrl+B 切割" ToolTip="拖移片段、拖兩端修剪；點時間刻度定位，Ctrl+B 切割；Delete 移除" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="空白處拖曳框選 · Ctrl 加選 · ← → 逐格" ToolTip="空白處拖曳框選；Ctrl+框選加入。拖曳中央可整組跨軌，Esc 取消。← → 逐格，Shift+← → 一秒；Home/End 起訖；Ctrl+0 顯示全部；S 切換吸附。" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                     <ScrollBar x:Name="TimelineHorizontalScroll" Grid.Column="2" Orientation="Horizontal" Minimum="0" Maximum="60" SmallChange="1" LargeChange="10"
                                Value="{Binding TimelineOffsetSeconds, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}" />
                 </Grid>

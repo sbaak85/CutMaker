@@ -61,10 +61,10 @@ public partial class MainWindow
     private CutProject PlanLinkedReplacement(Clip replacement, bool moveSelection = false)
     {
         var old = _project.Clips.First(c => c.Id == replacement.Id);
-        if (old.LinkGroupId is not null && old.TrackId != replacement.TrackId)
-            throw new ProjectValidationException("連動片段請保留原軌道，或先解除連動。");
         if (moveSelection)
             return TimelineBatchEditor.Move(_project, SelectionIds(), replacement.Start - old.Start, old.Id, replacement.TrackId);
+        if (old.LinkGroupId is not null && old.TrackId != replacement.TrackId)
+            throw new ProjectValidationException("連動片段請保留原軌道，或先解除連動。");
         var replacements = new List<Clip> { replacement };
         if (old.LinkGroupId is not null && (old.Start != replacement.Start || old.SourceIn != replacement.SourceIn || old.Duration != replacement.Duration))
         {

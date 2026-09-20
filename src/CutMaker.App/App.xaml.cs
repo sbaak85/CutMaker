@@ -63,6 +63,8 @@ public partial class App : Application
             window.VerifyLayoutBounds();
             Render(window, Path.Combine(folder, "workspace-editing.png"));
             BatchSmokeChecks.Run(window, folder);
+            ConvenienceSmokeChecks.Run(window, folder, name => Render(window, Path.Combine(folder, name)));
+            NavigationSmokeChecks.Run(window, folder);
             await RecoverySmokeChecks.RunAsync(window, folder);
             await window.RunPreviewSmokeAsync(folder);
             await SettleLayout(window);
@@ -114,7 +116,7 @@ public partial class App : Application
             window.MinHeight = Math.Min(720, SystemParameters.WorkArea.Height);
             window.ApplyLayout(new());
             await SettleLayout(window);
-            File.WriteAllText(Path.Combine(folder, "result.txt"), "PASS: startup; native media import; file-drop handling; import cancellation; timeline placement; editing and independent/custom Fade; multi-selection and linked batch operations; recovery and relink; source waveforms and thumbnails; quick-seek frames and bounded native preview playback; output settings; project round-trip; add track; default/compact/minimum/small-display layout bounds; visible media rows and long filenames; layout persistence; PNG rendering.");
+            File.WriteAllText(Path.Combine(folder, "result.txt"), "PASS: startup; native media import; file-drop handling; import cancellation; timeline placement; editing and independent/custom Fade; multi-selection and linked batch operations; marquee selection and group cross-track movement; frame/boundary/fit navigation; recovery and relink; source waveforms and thumbnails; quick-seek frames and bounded native preview playback; output settings; project round-trip; add track; default/compact/minimum/small-display layout bounds; visible media rows and long filenames; layout persistence; PNG rendering.");
             window.Close();
             Shutdown(0);
         }

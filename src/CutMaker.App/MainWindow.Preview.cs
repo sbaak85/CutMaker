@@ -347,7 +347,7 @@ public partial class MainWindow
             await Task.Delay(110, cancellation.Token);
             var duration = PreviewDuration;
             var fps = Math.Min(30, _project.Video.Fps);
-            var time = Math.Max(0, Math.Min(seconds, duration - Math.Min(1 / fps, duration)));
+            var time = Math.Max(0, Math.Min(seconds, TimelineNavigation.StepFrame(duration, -1, _project.Video.Fps, duration)));
             var end = Math.Min(duration, time + 2 / fps);
             var snapshot = _project with
             {
@@ -436,6 +436,7 @@ public partial class MainWindow
     private void TimelineRuler_MouseDown(object sender, MouseButtonEventArgs e)
     {
         var ruler = (UIElement)sender;
+        Keyboard.Focus(ruler);
         BeginPreviewScrub();
         ruler.CaptureMouse();
         SeekPreview(TimelineOffsetSeconds + e.GetPosition(ruler).X / TimelinePixelsPerSecond);

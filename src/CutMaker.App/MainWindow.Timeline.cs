@@ -73,7 +73,7 @@ public partial class MainWindow
         if ((modifiers & ModifierKeys.Control) == 0 || delta == 0 || !double.IsFinite(pointerX) ||
             pointerX < 0 || pointerX > TimelineViewportWidth) return false;
         // Keep captured trim/move/scrub coordinates stable until the current gesture ends.
-        if (_pointerOriginal is not null || _draggingFromLibrary || _previewScrubbing) return true;
+        if (_pointerOriginal is not null || IsMarqueeSelecting || _draggingFromLibrary || _previewScrubbing) return true;
         var oldScale = TimelinePixelsPerSecond;
         var anchorTime = TimelineOffsetSeconds + pointerX / oldScale;
         var scale = Math.Clamp(oldScale * Math.Pow(1.2, Math.Clamp(delta / 120.0, -20, 20)),
@@ -185,7 +185,7 @@ public partial class MainWindow
         var boundaries = _project.Clips.SelectMany(clip => new[] { clip.Start, clip.End }).Prepend(0);
         var requestedStart = start;
         var nearest = boundaries.MinBy(boundary => Math.Abs(boundary - requestedStart));
-        if (Math.Abs(nearest - start) <= tolerance) start = nearest;
+        if (ShouldSnapTimeline && Math.Abs(nearest - start) <= tolerance) start = nearest;
         return TimelinePlacement.CanPlace(_project, asset.Id, trackId, start, out reason);
     }
 
@@ -250,6 +250,13 @@ public partial class MainWindow
         var time = TimelineOffsetSeconds + point.X / TimelinePixelsPerSecond;
         var selected = _project.Clips.LastOrDefault(clip => clip.TrackId == (string)lane.Tag && clip.Start <= time && time < clip.End);
         _selectedTrackId = (string)lane.Tag;
+        if (_previewPreparing) InvalidatePreview();
+        PausePreview();
+        if (selected is null)
+        {
+            BeginMarqueeSelection(lane, point, Keyboard.Modifiers.HasFlag(ModifierKeys.Control));
+            Keyboard.Focus(lane); SeekPreview(Math.Max(0, time)); e.Handled = true; return;
+        }
         SelectClipClick(selected?.Id, Keyboard.Modifiers.HasFlag(ModifierKeys.Control));
         RemoveClipButton.IsEnabled = SelectedTimelineClipId is not null;
         RefreshSelectionInspector();

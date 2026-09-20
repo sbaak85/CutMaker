@@ -8,6 +8,7 @@ namespace CutMaker.App;
 
 public sealed record TimelineClipView(string Id, string Name, MediaKind Kind, double Start, double Duration, double FadeIn = 0, double FadeOut = 0,
     ImageSource? Thumbnail = null, ImageSource? Waveform = null, double SourceIn = 0, double SourceDuration = 0);
+public sealed record TimelineMoveGhost(string Id, double Start, double Duration);
 
 /// <summary>A viewport-sized, retained-data lane. Drawing never changes clip timing or source media.</summary>
 public sealed class TimelineLane : FrameworkElement
@@ -51,6 +52,7 @@ public sealed class TimelineLane : FrameworkElement
     private double? _dropStart;
     private double _dropDuration;
     private bool _dropAllowed;
+    public IReadOnlyList<TimelineMoveGhost> MovePreviews { get; private set; } = [];
 
     public TimelineLane()
     {
@@ -91,10 +93,18 @@ public sealed class TimelineLane : FrameworkElement
 
     public void SetDropPreview(double? start, double duration, bool allowed)
     {
+        MovePreviews = [];
         _dropStart = start is >= 0 && double.IsFinite(start.Value) && duration > 0 && double.IsFinite(duration)
             ? start : null;
         _dropDuration = duration;
         _dropAllowed = allowed;
+        InvalidateVisual();
+    }
+
+    public void SetMovePreviews(IReadOnlyList<TimelineMoveGhost> clips)
+    {
+        _dropStart = null;
+        MovePreviews = clips;
         InvalidateVisual();
     }
 
@@ -128,6 +138,14 @@ public sealed class TimelineLane : FrameworkElement
                     $"{(allowed ? "放入" : "無法放入")} {TimelineDrawing.FormatTime(start)}", 12,
                     TimelineDrawing.Foreground, new Point(preview.Left + 8, preview.Top + 6), preview.Width - 16);
         }
+
+        foreach (var ghost in MovePreviews)
+            if (TryGetVisibleRect(ghost.Start, ghost.Duration, out var boundsPreview))
+            {
+                drawing.DrawRoundedRectangle(AllowedFill, AllowedPen, boundsPreview, 4, 4);
+                TimelineDrawing.DrawText(this, drawing, $"移動 {TimelineDrawing.FormatTime(ghost.Start, true)}", 11,
+                    TimelineDrawing.Foreground, new Point(boundsPreview.Left + 6, boundsPreview.Top + 7), boundsPreview.Width - 12);
+            }
 
         var playheadX = (PlayheadSeconds - OffsetSeconds) * PixelsPerSecond;
         if (playheadX >= 0 && playheadX <= ActualWidth)
@@ -254,6 +272,7 @@ public sealed class TimelineRuler : FrameworkElement
 
     public TimelineRuler()
     {
+        Focusable = true;
         ClipToBounds = true;
         SnapsToDevicePixels = true;
         UseLayoutRounding = true;

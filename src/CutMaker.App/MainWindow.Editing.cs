@@ -43,6 +43,7 @@ public partial class MainWindow
 
     internal void ClearEditHistory()
     {
+        EndMarqueeSelection(cancel: true);
         CancelPointerEdit();
         _undo.Clear(); _redo.Clear(); _selectedTrackId = null;
         RefreshHistoryButtons();
@@ -61,6 +62,7 @@ public partial class MainWindow
     private void RestoreEdit(List<EditSnapshot> from, List<EditSnapshot> to, string message)
     {
         if (from.Count == 0) return;
+        EndMarqueeSelection(cancel: true);
         CancelPointerEdit();
         _importCancellation?.Cancel();
         _projectGeneration++; // In-flight import/drag results belong to the old state.
@@ -236,6 +238,12 @@ public partial class MainWindow
 
     private void TimelineLane_MouseMove(object sender, MouseEventArgs e)
     {
+        if (IsMarqueeSelecting)
+        {
+            if (e.LeftButton != MouseButtonState.Pressed) EndMarqueeSelection(cancel: true);
+            else UpdateMarqueeFromPointer(e);
+            e.Handled = true; return;
+        }
         if (_pointerOriginal is not { } original || _pointerLane is not { } captured)
         {
             if (sender is TimelineLane hovered)
@@ -251,6 +259,7 @@ public partial class MainWindow
         if (!_pointerMoved && Math.Abs(local.X - _pointerOrigin.X) < SystemParameters.MinimumHorizontalDragDistance &&
             Math.Abs(local.Y - _pointerOrigin.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         _pointerMoved = true;
+        ScrollTracksDuringDrag(e.GetPosition(TimelineContent).Y);
         var target = _pointerMode == PointerEdit.Move ? FindLanes(TrackItems).FirstOrDefault(lane =>
         {
             var point = e.GetPosition(lane);
@@ -273,10 +282,14 @@ public partial class MainWindow
             };
             var allowed = true;
             var reason = "";
-            try { PlanLinkedReplacement(next, _pointerMode == PointerEdit.Move); }
+            try
+            {
+                if (_pointerMode == PointerEdit.Move) { allowed = TryPreviewGroupMove(next); reason = StatusText.Text; }
+                else PlanLinkedReplacement(next);
+            }
             catch (ProjectValidationException error) { allowed = false; reason = error.Message; }
             _pointerCandidate = allowed ? next : null;
-            target.SetDropPreview(next.Start, next.Duration, allowed);
+            if (_pointerMode != PointerEdit.Move) target.SetDropPreview(next.Start, next.Duration, allowed);
             var action = _pointerMode switch { PointerEdit.Move => "移動", PointerEdit.FadeIn => $"淡入 {next.FadeIn!.Duration:0.###} 秒", PointerEdit.FadeOut => $"淡出 {next.FadeOut!.Duration:0.###} 秒", _ => "修剪" };
             StatusText.Text = allowed ? $"{action} · 起點 {FormatDuration(next.Start)} · 長度 {FormatDuration(next.Duration)} · 放開套用"
                 : reason;
@@ -299,19 +312,26 @@ public partial class MainWindow
             : ClipEditor.TrimEnd(original, Math.Clamp(edge, original.Start + minimum, image ? double.MaxValue : original.Start + duration - original.SourceIn), duration, image);
     }
 
-    private double SnapEditTime(double time, string clipId, double duration = 0)
+    internal double SnapEditTime(double time, string clipId, double duration = 0)
     {
         var result = TimelinePlacement.RoundToFrame(time, _project.Video.Fps);
+        if (!ShouldSnapTimeline) return result;
         var tolerance = Math.Min(.25, 8 / TimelinePixelsPerSecond);
         var selected = SelectionIds();
         var boundaries = _project.Clips.Where(clip => clip.Id != clipId && !selected.Contains(clip.Id)).SelectMany(clip => new[] { clip.Start, clip.End }).Prepend(0);
-        var candidates = boundaries.SelectMany(edge => duration > 0 ? new[] { edge, edge - duration } : new[] { edge }).Where(value => value >= 0);
+        var primary = _project.Clips.FirstOrDefault(c => c.Id == clipId);
+        var offsets = duration > 0 && primary is not null && selected.Contains(primary.Id)
+            ? _project.Clips.Where(c => selected.Contains(c.Id)).SelectMany(c => new[] { c.Start - primary.Start, c.End - primary.Start }).ToArray()
+            : duration > 0 ? new[] { 0.0, duration } : new[] { 0.0 };
+        var candidates = boundaries.SelectMany(edge => offsets.Select(offset => edge - offset)).Where(value => value >= 0);
         var nearest = candidates.MinBy(value => Math.Abs(value - result));
         return Math.Abs(nearest - result) <= tolerance ? nearest : result;
     }
 
     private void TimelineLane_MouseUp(object sender, MouseButtonEventArgs e)
     {
+        if (IsMarqueeSelecting)
+        { UpdateMarqueeFromPointer(e, autoScroll: false); EndMarqueeSelection(cancel: false); e.Handled = true; return; }
         var candidate = _pointerCandidate;
         var moved = _pointerMoved;
         var moveSelection = _pointerMode == PointerEdit.Move;
@@ -319,7 +339,8 @@ public partial class MainWindow
         if (moved && candidate is not null) CommitBatch(() => PlanLinkedReplacement(candidate, moveSelection), "已更新選取片段 · Ctrl+Z 復原");
         e.Handled = true;
     }
-    private void TimelineLane_LostCapture(object sender, MouseEventArgs e) => CancelPointerEdit();
+    private void TimelineLane_LostCapture(object sender, MouseEventArgs e)
+    { if (IsMarqueeSelecting) EndMarqueeSelection(cancel: true); CancelPointerEdit(); }
     private void CancelPointerEdit()
     {
         var lane = _pointerLane;

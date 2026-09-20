@@ -1,5 +1,8 @@
 namespace CutMaker.Core;
 
+/// <summary>A validated preview of a group move; nothing has been committed to the input project.</summary>
+public sealed record TimelineMovePlan(CutProject Project, IReadOnlyList<Clip> MovedClips, int TrackOffset);
+
 /// <summary>Atomic multi-clip operations. Inputs and source files are never changed.</summary>
 public static class TimelineBatchEditor
 {
@@ -24,13 +27,45 @@ public static class TimelineBatchEditor
     }
 
     public static CutProject Move(CutProject project, IEnumerable<string> ids, double delta, string primaryId, string targetTrack)
+        => PlanMove(project, ids, delta, primaryId, targetTrack).Project;
+
+    /// <summary>
+    /// Moves every selected or linked clip by the same time delta and same-kind track offset.
+    /// A primary V1-to-V2 move maps V3 to V4 and A1 to A2, regardless of interleaving in the track list.
+    /// Missing, locked, incompatible or occupied destinations reject the complete plan.
+    /// </summary>
+    public static TimelineMovePlan PlanMove(CutProject project, IEnumerable<string> ids, double delta, string primaryId, string targetTrack)
     {
         var selected = ExpandLinks(project, ids);
-        var primary = project.Clips.First(c => c.Id == primaryId);
-        // A group keeps its track arrangement. A single unlinked clip can move across compatible tracks.
-        ProjectValidator.Require(selected.Count == 1 || primary.TrackId == targetTrack, "多選或連動片段會保留原軌道；可水平拖曳整組。");
-        return Replace(project, project.Clips.Where(c => selected.Contains(c.Id)).Select(c => c with
-        { Start = c.Start + delta, TrackId = selected.Count == 1 ? targetTrack : c.TrackId }));
+        var primary = project.Clips.FirstOrDefault(c => c.Id == primaryId);
+        ProjectValidator.Require(primary is not null && selected.Contains(primaryId), "請選取要移動的主片段。");
+        ProjectValidator.Require(selected.Count > 0 && selected.All(id => project.Clips.Any(c => c.Id == id)), "找不到要移動的片段。");
+        ProjectValidator.Require(double.IsFinite(delta), "片段移動的時間位移無效。");
+        var source = project.Tracks.FirstOrDefault(t => t.Id == primary!.TrackId);
+        var target = project.Tracks.FirstOrDefault(t => t.Id == targetTrack);
+        ProjectValidator.Require(source is not null && target is not null, "找不到來源或目標軌道。");
+        ProjectValidator.Require(source!.Kind == target!.Kind, "請拖到相同類型的軌道；影片軌與音訊軌不能互換。");
+
+        var byKind = project.Tracks.GroupBy(t => t.Kind).ToDictionary(g => g.Key, g => g.ToList());
+        var primaryTracks = byKind[source.Kind];
+        var trackOffset = primaryTracks.FindIndex(t => t.Id == target.Id) - primaryTracks.FindIndex(t => t.Id == source.Id);
+        var replacements = new List<Clip>();
+        foreach (var clip in project.Clips.Where(c => selected.Contains(c.Id)))
+        {
+            var oldTrack = project.Tracks.FirstOrDefault(t => t.Id == clip.TrackId);
+            ProjectValidator.Require(oldTrack is not null, "找不到選取片段的來源軌道。");
+            var tracks = byKind[oldTrack!.Kind];
+            var index = tracks.FindIndex(t => t.Id == oldTrack.Id) + trackOffset;
+            var kindName = oldTrack.Kind == TrackKind.Video ? "影片" : "音訊";
+            ProjectValidator.Require(index >= 0 && index < tracks.Count,
+                $"整組移動需要更多{kindName}軌道，請先在{(index < 0 ? "上方" : "下方")}新增{kindName}軌道，或縮小跨軌距離。");
+            var start = clip.Start + delta;
+            ProjectValidator.Require(double.IsFinite(start + clip.Duration) && start + clip.Duration > start,
+                "片段移動的位置超出可用時間範圍。");
+            replacements.Add(clip with { Start = start, TrackId = tracks[index].Id });
+        }
+        var candidate = Replace(project, replacements);
+        return new(candidate, replacements.AsReadOnly(), trackOffset);
     }
 
     public static CutProject Delete(CutProject project, IEnumerable<string> ids, bool ripple)
