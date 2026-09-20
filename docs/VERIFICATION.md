@@ -1,4 +1,18 @@
-# 0.2 原型驗證紀錄
+# 0.7.1 Fade 即時拖曳驗證
+
+日期：2026-09-21。位置：`I:\Codex\工具型\CutMaker`。
+
+- `scripts/verify.ps1` 全部通過：Release 建置 0 警告／0 錯誤、核心 25／25、渲染／混音整合 116／116，以及 WPF 整合與獨立程序音訊播放。
+- Fade-in／Fade-out 在按住期間的兩個中間位置均驗證實際曲線與金色控制點像素；涵蓋正常／30 px 收折軌道、非零時間偏移及縮放。
+- 驗證拖曳不改動專案、歷史或預覽版本；Esc／失去擷取還原畫面，放開只增加一次 Undo，連動夥伴效果保持獨立。
+- 已查看拖曳中正常／收折畫面，以及預設、窄版、最小與小螢幕版面 PNG。切割沿用既有 Ctrl+B。
+- 首次像素檢查失敗來自測試截圖帶入軌道父容器的座標偏移；改用工作區截圖相同的 VisualBrush 渲染方式後通過，未放寬像素條件。
+
+本地證據：`runtime/verification/smoke/fade-drag-result.txt`、`workspace-fade-*-dragging.png`、`runtime/verification/audio-smoke/result.txt` 與 `runtime/render-checks/render-result.txt`。額外匯入本地 Mozilla CC0 MP4／MP3 素材。
+
+Fade 手勢驗證呼叫正式滑鼠處理器共用的候選更新入口、放開／取消入口並檢查 WPF 渲染像素；尚未做真人滑鼠手感驗收。
+
+# 0.2 原型驗證紀錄（歷史）
 
 日期：2026-09-20。位置：`I:\Codex\工具型\CutMaker`。
 

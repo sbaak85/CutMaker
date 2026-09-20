@@ -33,6 +33,7 @@ Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'smoke\convenience-re
 Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'smoke\navigation-result.txt')
 Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'smoke\zoom-range-result.txt')
 Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'smoke\track-controls-result.txt')
+Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'smoke\fade-drag-result.txt')
 Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'smoke\transport-result.txt')
 Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'smoke\ime-hotkey-result.txt')
 Get-Content -LiteralPath (Join-Path $env:CUTMAKER_DATA_DIR 'smoke\recovery-result.txt')

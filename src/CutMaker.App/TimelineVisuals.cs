@@ -7,7 +7,8 @@ using CutMaker.Core;
 namespace CutMaker.App;
 
 public sealed record TimelineClipView(string Id, string Name, MediaKind Kind, double Start, double Duration, double FadeIn = 0, double FadeOut = 0,
-    ImageSource? Thumbnail = null, ImageSource? Waveform = null, double SourceIn = 0, double SourceDuration = 0);
+    ImageSource? Thumbnail = null, ImageSource? Waveform = null, double SourceIn = 0, double SourceDuration = 0,
+    FadeSettings? FadeInSettings = null, FadeSettings? FadeOutSettings = null);
 public sealed record TimelineMoveGhost(string Id, double Start, double Duration);
 
 /// <summary>A viewport-sized, retained-data lane. Drawing never changes clip timing or source media.</summary>
@@ -55,6 +56,7 @@ public sealed class TimelineLane : FrameworkElement
     private double? _dropStart;
     private double _dropDuration;
     private bool _dropAllowed;
+    private Clip? _fadePreview;
     public IReadOnlyList<TimelineMoveGhost> MovePreviews { get; private set; } = [];
 
     public TimelineLane()
@@ -103,6 +105,7 @@ public sealed class TimelineLane : FrameworkElement
 
     public void SetDropPreview(double? start, double duration, bool allowed)
     {
+        _fadePreview = null;
         MovePreviews = [];
         _dropStart = start is >= 0 && double.IsFinite(start.Value) && duration > 0 && double.IsFinite(duration)
             ? start : null;
@@ -113,8 +116,17 @@ public sealed class TimelineLane : FrameworkElement
 
     public void SetMovePreviews(IReadOnlyList<TimelineMoveGhost> clips)
     {
+        _fadePreview = null;
         _dropStart = null;
         MovePreviews = clips;
+        InvalidateVisual();
+    }
+
+    public void SetFadePreview(Clip? candidate)
+    {
+        _dropStart = null;
+        MovePreviews = [];
+        _fadePreview = candidate;
         InvalidateVisual();
     }
 
@@ -133,7 +145,12 @@ public sealed class TimelineLane : FrameworkElement
                 12, TimelineDrawing.Muted, new Point(14, Math.Max(2, (ActualHeight - 18) / 2)), Math.Max(1, ActualWidth - 28));
         else
             foreach (var clip in clips)
-                DrawClip(drawing, clip);
+                // Keep the bound view and mouse capture intact. Only the held drag's fade is provisional;
+                // asynchronous waveform updates can still replace the underlying bitmap normally.
+                DrawClip(drawing, _fadePreview is { } candidate && candidate.Id == clip.Id
+                    ? clip with { FadeIn = candidate.FadeIn?.Duration ?? 0, FadeOut = candidate.FadeOut?.Duration ?? 0,
+                        FadeInSettings = candidate.FadeIn, FadeOutSettings = candidate.FadeOut }
+                    : clip);
 
         if (_dropStart is double start && TryGetVisibleRect(start, _dropDuration, out var preview))
         {
@@ -199,11 +216,9 @@ public sealed class TimelineLane : FrameworkElement
             if (actualRight <= ActualWidth) drawing.DrawLine(SelectionPen, new Point(actualRight - 4, rect.Top + gripInset), new Point(actualRight - 4, rect.Bottom - gripInset));
         }
         if (clip.FadeIn > 0)
-            drawing.DrawLine(TimelineDrawing.FadePen, new Point(actualLeft, rect.Bottom - 3),
-                new Point(actualLeft + clip.FadeIn * PixelsPerSecond, rect.Top + 3));
+            DrawFade(drawing, rect, actualLeft, clip.FadeIn, clip.FadeInSettings, fadeOut: false);
         if (clip.FadeOut > 0)
-            drawing.DrawLine(TimelineDrawing.FadePen, new Point(actualRight - clip.FadeOut * PixelsPerSecond, rect.Top + 3),
-                new Point(actualRight, rect.Bottom - 3));
+            DrawFade(drawing, rect, actualRight - clip.FadeOut * PixelsPerSecond, clip.FadeOut, clip.FadeOutSettings, fadeOut: true);
         if (rect.Width <= 18 || rect.Height <= 18) return;
 
         var textX = rect.Left + 8;
@@ -223,6 +238,30 @@ public sealed class TimelineLane : FrameworkElement
             drawing.DrawRectangle(TimelineDrawing.PlayheadPen.Brush, null, new Rect(fadeInHandle - handle / 2, rect.Top + 1, handle, handle));
             drawing.DrawRectangle(TimelineDrawing.PlayheadPen.Brush, null, new Rect(fadeOutHandle - handle / 2, rect.Top + 1, handle, handle));
         }
+    }
+
+    private void DrawFade(DrawingContext drawing, Rect rect, double startX, double duration, FadeSettings? settings, bool fadeOut)
+    {
+        var width = duration * PixelsPerSecond;
+        var left = Math.Max(0, startX);
+        var right = Math.Min(ActualWidth, startX + width);
+        if (right <= left) return;
+        settings ??= new FadeSettings(duration);
+        // Sample only the visible portion, so long fades and deep zooms stay inexpensive.
+        var steps = Math.Clamp((int)Math.Ceiling((right - left) / 2), 1, 4096);
+        var geometry = new StreamGeometry();
+        using (var context = geometry.Open())
+            for (var index = 0; index <= steps; index++)
+            {
+                var x = left + (right - left) * index / steps;
+                var progress = (x - startX) / width;
+                var gain = FadeEnvelope.CurveValue(settings, fadeOut ? 1 - progress : progress);
+                var point = new Point(x, rect.Bottom - 3 - gain * (rect.Height - 6));
+                if (index == 0) context.BeginFigure(point, false, false);
+                else context.LineTo(point, true, false);
+            }
+        geometry.Freeze();
+        drawing.DrawGeometry(null, TimelineDrawing.FadePen, geometry);
     }
 
     private bool TryGetVisibleRect(double start, double duration, out Rect rect)

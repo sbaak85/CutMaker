@@ -53,7 +53,7 @@ public partial class MainWindow
             Clips = (IReadOnlyList<TimelineClipView>)_project.Clips.Where(clip => clip.TrackId == track.Id).OrderBy(clip => clip.Start)
                 .Select(clip => new TimelineClipView(clip.Id, (clip.LinkGroupId is null ? "" : "↔ ") + Path.GetFileName(assets[clip.AssetId].Path), track.Kind == TrackKind.Audio ? MediaKind.Audio : assets[clip.AssetId].Kind, clip.Start, clip.Duration,
                     clip.FadeIn?.Duration ?? 0, clip.FadeOut?.Duration ?? 0, GetMediaVisuals(clip.AssetId)?.Thumbnail, GetMediaVisuals(clip.AssetId)?.Waveform,
-                    clip.SourceIn, assets[clip.AssetId].Duration)).ToArray()
+                    clip.SourceIn, assets[clip.AssetId].Duration, clip.FadeIn, clip.FadeOut)).ToArray()
         }).ToArray();
         TrackCount.Text = $"{_project.Tracks.Count} 條軌道 · {_project.Clips.Count} 個片段";
         RemoveClipButton.IsEnabled = SelectedTimelineClipId is not null;

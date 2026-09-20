@@ -245,7 +245,7 @@ public partial class MainWindow
             else UpdateMarqueeFromPointer(e);
             e.Handled = true; return;
         }
-        if (_pointerOriginal is not { } original || _pointerLane is not { } captured)
+        if (_pointerOriginal is null || _pointerLane is not { } captured)
         {
             if (sender is TimelineLane hovered)
             {
@@ -259,16 +259,22 @@ public partial class MainWindow
         var local = e.GetPosition(captured);
         if (!_pointerMoved && Math.Abs(local.X - _pointerOrigin.X) < SystemParameters.MinimumHorizontalDragDistance &&
             Math.Abs(local.Y - _pointerOrigin.Y) < SystemParameters.MinimumVerticalDragDistance) return;
-        _pointerMoved = true;
         ScrollTracksDuringDrag(e.GetPosition(TimelineContent).Y);
         var target = _pointerMode == PointerEdit.Move ? FindLanes(TrackItems).FirstOrDefault(lane =>
         {
             var point = e.GetPosition(lane);
             return point.X >= 0 && point.X <= lane.ActualWidth && point.Y >= 0 && point.Y <= lane.ActualHeight;
         }) : captured;
+        UpdatePointerEditAt(target, target is null ? default : e.GetPosition(target));
+        e.Handled = true;
+    }
+
+    private void UpdatePointerEditAt(TimelineLane? target, Point point)
+    {
+        if (_pointerOriginal is not { } original || _pointerLane is null) return;
+        _pointerMoved = true;
         foreach (var lane in FindLanes(TrackItems)) lane.SetDropPreview(null, 0, false);
         if (target is null) { _pointerCandidate = null; StatusText.Text = "請將片段拖至相容軌道內"; return; }
-        var point = e.GetPosition(target);
         ScrollDuringDrag(point.X, target.ActualWidth);
         var rawTime = Math.Max(0, TimelineOffsetSeconds + point.X / TimelinePixelsPerSecond);
         try
@@ -290,13 +296,14 @@ public partial class MainWindow
             }
             catch (ProjectValidationException error) { allowed = false; reason = error.Message; }
             _pointerCandidate = allowed ? next : null;
-            if (_pointerMode != PointerEdit.Move) target.SetDropPreview(next.Start, next.Duration, allowed);
+            if (allowed && _pointerMode is PointerEdit.FadeIn or PointerEdit.FadeOut)
+                target.SetFadePreview(next);
+            else if (_pointerMode != PointerEdit.Move) target.SetDropPreview(next.Start, next.Duration, allowed);
             var action = _pointerMode switch { PointerEdit.Move => "移動", PointerEdit.FadeIn => $"淡入 {next.FadeIn!.Duration:0.###} 秒", PointerEdit.FadeOut => $"淡出 {next.FadeOut!.Duration:0.###} 秒", _ => "修剪" };
             StatusText.Text = allowed ? $"{action} · 起點 {FormatDuration(next.Start)} · 長度 {FormatDuration(next.Duration)} · 放開套用"
                 : reason;
         }
         catch (ProjectValidationException error) { _pointerCandidate = null; StatusText.Text = error.Message; }
-        e.Handled = true;
     }
 
     internal Clip PlanPointerTrim(Clip original, bool trimStart, double pointerDownTime, double pointerTime)

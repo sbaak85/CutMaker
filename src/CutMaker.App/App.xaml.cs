@@ -89,6 +89,7 @@ public partial class App : Application
             NavigationSmokeChecks.Run(window, folder);
             ZoomRangeSmokeChecks.Run(window, folder, name => Render(window, Path.Combine(folder, name)));
             await TrackControlsSmokeChecks.RunAsync(window, folder, name => Render(window, Path.Combine(folder, name)));
+            window.RunFadeDragSmoke(folder, name => Render(window, Path.Combine(folder, name)));
             await RecoverySmokeChecks.RunAsync(window, folder);
             await window.RunPreviewSmokeAsync(folder);
             await SettleLayout(window);

@@ -53,7 +53,7 @@
                 <TextBlock Text="CutMaker" FontSize="25" FontWeight="SemiBold" VerticalAlignment="Center" />
                 <TextBlock Text="專注每一段畫面與聲音" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="18,0,0,0" />
             </StackPanel>
-            <TextBlock Grid.Column="1" Text="0.7 · 音訊即時預覽" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="0.7.1 · Fade 即時拖曳" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
         </Grid>
         <WrapPanel x:Name="ProjectToolbar" Grid.Row="1">
             <Button Content="新增專案" Click="New_Click" ToolTip="Ctrl+N" />
