@@ -6,9 +6,12 @@ using CutMaker.Core;
 
 namespace CutMaker.App;
 
+internal enum PointerEdit { Move, TrimStart, TrimEnd, FadeIn, FadeOut }
+
 public sealed record TimelineClipView(string Id, string Name, MediaKind Kind, double Start, double Duration, double FadeIn = 0, double FadeOut = 0,
     ImageSource? Thumbnail = null, ImageSource? Waveform = null, double SourceIn = 0, double SourceDuration = 0,
-    FadeSettings? FadeInSettings = null, FadeSettings? FadeOutSettings = null);
+    FadeSettings? FadeInSettings = null, FadeSettings? FadeOutSettings = null,
+    double WaveformStart = 0, double WaveformDuration = 0);
 public sealed record TimelineMoveGhost(string Id, double Start, double Duration);
 
 /// <summary>A viewport-sized, retained-data lane. Drawing never changes clip timing or source media.</summary>
@@ -57,6 +60,11 @@ public sealed class TimelineLane : FrameworkElement
     private double _dropDuration;
     private bool _dropAllowed;
     private Clip? _fadePreview;
+    private TimelineClipView? _hoverClip;
+    private PointerEdit _hoverMode;
+    private DrawingGroup? _clipDrawing;
+    private (object? Clips, double Width, double Height, double Scale, double Offset, string? Selected,
+        object? Selection, bool Locked, bool Compact, Clip? Fade, double Dpi)? _drawingKey;
     public IReadOnlyList<TimelineMoveGhost> MovePreviews { get; private set; } = [];
 
     public TimelineLane()
@@ -99,6 +107,20 @@ public sealed class TimelineLane : FrameworkElement
         set => SetValue(IsCompactProperty, value);
     }
     public double FadeHandleHitHeight => IsCompact ? 9 : 17;
+    internal double FadeHitRadius => IsCompact ? 7 : 10;
+    internal double EdgeWidth(double duration) => Math.Min(IsCompact ? 8 : 10, duration * PixelsPerSecond / 4);
+    internal PointerEdit HitEdit(double start, double duration, double fadeIn, double fadeOut, Point point)
+    {
+        var left = (start - OffsetSeconds) * PixelsPerSecond;
+        var right = left + duration * PixelsPerSecond;
+        var edge = EdgeWidth(duration);
+        var inX = Math.Clamp(left + fadeIn * PixelsPerSecond, left + edge, right - edge);
+        var outX = Math.Clamp(right - fadeOut * PixelsPerSecond, left + edge, right - edge);
+        var inDistance = Math.Abs(point.X - inX); var outDistance = Math.Abs(point.X - outX);
+        if (point.Y <= FadeHandleHitHeight && Math.Min(inDistance, outDistance) <= FadeHitRadius)
+            return inDistance <= outDistance ? PointerEdit.FadeIn : PointerEdit.FadeOut;
+        return Math.Abs(point.X - left) <= edge ? PointerEdit.TrimStart : Math.Abs(point.X - right) <= edge ? PointerEdit.TrimEnd : PointerEdit.Move;
+    }
     public IReadOnlyList<string>? SelectedClipIds
     { get => (IReadOnlyList<string>?)GetValue(SelectedClipIdsProperty); set => SetValue(SelectedClipIdsProperty, value); }
     public double PlayheadSeconds { get => (double)GetValue(PlayheadSecondsProperty); set => SetValue(PlayheadSecondsProperty, value); }
@@ -136,21 +158,46 @@ public sealed class TimelineLane : FrameworkElement
         if (ActualWidth <= 0 || ActualHeight <= 0) return;
         var bounds = new Rect(0, 0, ActualWidth, ActualHeight);
         drawing.PushClip(new RectangleGeometry(bounds));
-        drawing.DrawRectangle(IsLocked ? LockedBrush : BackgroundBrush, null, bounds);
-        TimelineDrawing.DrawGrid(drawing, ActualWidth, ActualHeight, PixelsPerSecond, OffsetSeconds);
-
         var clips = Clips;
-        if (clips is null || clips.Count == 0)
-            TimelineDrawing.DrawText(this, drawing, IsLocked ? "軌道已鎖定" : "將素材拖到這裡",
+        var key = ((object?)clips, ActualWidth, ActualHeight, PixelsPerSecond, OffsetSeconds, SelectedClipId,
+            (object?)SelectedClipIds, IsLocked, IsCompact, _fadePreview, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        if (_clipDrawing is null || _drawingKey != key)
+        {
+            _drawingKey = key;
+            _clipDrawing = new DrawingGroup();
+            using var content = _clipDrawing.Open();
+            content.DrawRectangle(IsLocked ? LockedBrush : BackgroundBrush, null, bounds);
+            TimelineDrawing.DrawGrid(content, ActualWidth, ActualHeight, PixelsPerSecond, OffsetSeconds);
+            if (clips is null || clips.Count == 0)
+                TimelineDrawing.DrawText(this, content, IsLocked ? "軌道已鎖定" : "將素材拖到這裡",
                 12, TimelineDrawing.Muted, new Point(14, Math.Max(2, (ActualHeight - 18) / 2)), Math.Max(1, ActualWidth - 28));
-        else
-            foreach (var clip in clips)
+            else
+            foreach (var clip in VisibleClips(clips))
                 // Keep the bound view and mouse capture intact. Only the held drag's fade is provisional;
                 // asynchronous waveform updates can still replace the underlying bitmap normally.
-                DrawClip(drawing, _fadePreview is { } candidate && candidate.Id == clip.Id
+                DrawClip(content, _fadePreview is { } candidate && candidate.Id == clip.Id
                     ? clip with { FadeIn = candidate.FadeIn?.Duration ?? 0, FadeOut = candidate.FadeOut?.Duration ?? 0,
                         FadeInSettings = candidate.FadeIn, FadeOutSettings = candidate.FadeOut }
                     : clip);
+        }
+        drawing.DrawDrawing(_clipDrawing);
+        if (_hoverClip is { } hovered && !IsLocked && !IsMouseCaptured && _hoverMode != PointerEdit.Move && TryGetVisibleRect(hovered.Start, hovered.Duration, out var hoverBounds))
+        {
+            var left = (hovered.Start - OffsetSeconds) * PixelsPerSecond;
+            var right = left + hovered.Duration * PixelsPerSecond;
+            var edge = EdgeWidth(hovered.Duration);
+            if (_hoverMode is PointerEdit.FadeIn or PointerEdit.FadeOut)
+            {
+                var x = _hoverMode == PointerEdit.FadeIn ? left + hovered.FadeIn * PixelsPerSecond : right - hovered.FadeOut * PixelsPerSecond;
+                x = Math.Clamp(x, left + edge, right - edge);
+                drawing.DrawRoundedRectangle(null, TimelineDrawing.PlayheadPen, new Rect(x - 6, hoverBounds.Top, 12, IsCompact ? 9 : 12), 2, 2);
+            }
+            else
+            {
+                var x = _hoverMode == PointerEdit.TrimStart ? left + 3 : right - 3;
+                drawing.DrawLine(TimelineDrawing.PlayheadPen, new Point(x, hoverBounds.Top + 3), new Point(x, hoverBounds.Bottom - 3));
+            }
+        }
 
         if (_dropStart is double start && TryGetVisibleRect(start, _dropDuration, out var preview))
         {
@@ -181,6 +228,20 @@ public sealed class TimelineLane : FrameworkElement
         drawing.Pop();
     }
 
+    private IEnumerable<TimelineClipView> VisibleClips(IReadOnlyList<TimelineClipView> clips)
+    {
+        // Rows are sorted by start and cannot overlap. Binary search skips offscreen history.
+        var low = 0; var high = clips.Count;
+        while (low < high)
+        {
+            var middle = low + (high - low) / 2;
+            if (clips[middle].Start + clips[middle].Duration <= OffsetSeconds) low = middle + 1;
+            else high = middle;
+        }
+        var end = OffsetSeconds + ActualWidth / PixelsPerSecond;
+        for (var index = low; index < clips.Count && clips[index].Start < end; index++) yield return clips[index];
+    }
+
     private void DrawClip(DrawingContext drawing, TimelineClipView clip)
     {
         if (!TryGetVisibleRect(clip.Start, clip.Duration, out var rect)) return;
@@ -200,8 +261,8 @@ public sealed class TimelineLane : FrameworkElement
             if (clip.Waveform is not null && clip.SourceDuration > 0)
             {
                 // The cached waveform spans the source. Use source coordinates so trimmed clips stay aligned.
-                var sourceWidth = clip.SourceDuration * PixelsPerSecond;
-                drawing.DrawImage(clip.Waveform, new Rect(actualLeft - clip.SourceIn * PixelsPerSecond,
+                var sourceWidth = (clip.WaveformDuration > 0 ? clip.WaveformDuration : clip.SourceDuration) * PixelsPerSecond;
+                drawing.DrawImage(clip.Waveform, new Rect(actualLeft + (clip.WaveformStart - clip.SourceIn) * PixelsPerSecond,
                     visualRect.Top, sourceWidth, visualRect.Height));
             }
             if (clip.Thumbnail is not null && clip.Kind != MediaKind.Audio)
@@ -231,7 +292,7 @@ public sealed class TimelineLane : FrameworkElement
                 10, TimelineDrawing.Secondary, new Point(textX, rect.Top + 25), textWidth);
         if (clip.Id == SelectedClipId && rect.Width >= 18)
         {
-            var edge = Math.Min(8, clip.Duration * PixelsPerSecond / 4);
+            var edge = EdgeWidth(clip.Duration);
             var fadeInHandle = Math.Clamp(actualLeft + clip.FadeIn * PixelsPerSecond, actualLeft + edge, actualRight - edge);
             var fadeOutHandle = Math.Clamp(actualRight - clip.FadeOut * PixelsPerSecond, actualLeft + edge, actualRight - edge);
             var handle = IsCompact ? 6 : 8;
@@ -287,19 +348,9 @@ public sealed class TimelineLane : FrameworkElement
         var hit = Clips?.LastOrDefault(clip => time >= clip.Start && time < clip.Start + clip.Duration);
         if (!IsMouseCaptured)
         {
-            var edgeWidth = hit is null ? 0 : Math.Min(8, hit.Duration * PixelsPerSecond / 4);
-            var nearEdge = hit is not null && (Math.Abs((time - hit.Start) * PixelsPerSecond) <= edgeWidth ||
-                Math.Abs((hit.Start + hit.Duration - time) * PixelsPerSecond) <= edgeWidth);
-            var nearFade = false;
-            if (hit is not null && point.Y <= FadeHandleHitHeight)
-            {
-                var left = (hit.Start - OffsetSeconds) * PixelsPerSecond;
-                var right = left + hit.Duration * PixelsPerSecond;
-                var fadeIn = Math.Clamp(left + hit.FadeIn * PixelsPerSecond, left + edgeWidth, right - edgeWidth);
-                var fadeOut = Math.Clamp(right - hit.FadeOut * PixelsPerSecond, left + edgeWidth, right - edgeWidth);
-                nearFade = Math.Abs(point.X - fadeIn) <= 6 || Math.Abs(point.X - fadeOut) <= 6;
-            }
-            Cursor = IsLocked || hit is null ? Cursors.Arrow : nearEdge || nearFade ? Cursors.SizeWE : Cursors.SizeAll;
+            var mode = hit is null ? PointerEdit.Move : HitEdit(hit.Start, hit.Duration, hit.FadeIn, hit.FadeOut, point);
+            if (_hoverClip != hit || _hoverMode != mode) { _hoverClip = hit; _hoverMode = mode; InvalidateVisual(); }
+            Cursor = IsLocked || hit is null ? Cursors.Arrow : mode == PointerEdit.Move ? Cursors.SizeAll : Cursors.SizeWE;
         }
         var tooltip = hit is null ? null
             : $"{hit.Name}\n起點 {TimelineDrawing.FormatTime(hit.Start, true)} · 長度 {TimelineDrawing.FormatTime(hit.Duration, true)}\n拖曳中央移動 · 兩端修剪 · 上緣金色方塊調整 Fade";
@@ -308,6 +359,7 @@ public sealed class TimelineLane : FrameworkElement
 
     protected override void OnMouseLeave(MouseEventArgs e)
     {
+        _hoverClip = null; InvalidateVisual();
         ToolTip = null;
         base.OnMouseLeave(e);
     }

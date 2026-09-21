@@ -22,6 +22,7 @@ public partial class MainWindow
             if (item is TextBoxBase or ComboBox or MenuItem or ButtonBase) return false;
         }
         if (repeat) return true;
+        if (_panElement is not null && Mouse.MiddleButton == MouseButtonState.Pressed) return true;
         if (Mouse.LeftButton == MouseButtonState.Pressed &&
             (IsMarqueeSelecting || _pointerOriginal is not null || _previewScrubbing)) return true;
         // A handled/lost mouse-up must not leave a completed gesture swallowing every shortcut.

@@ -36,6 +36,15 @@ if (args.Contains("--audio-only"))
     });
     return;
 }
+if (args.Contains("--performance-only"))
+{
+    await PerformanceChecks.Run(Path.Combine(folder, "performance"), (condition, message) =>
+    {
+        if (!condition) throw new InvalidOperationException(message);
+        Console.WriteLine("PASS: " + message);
+    });
+    return;
+}
 var ffmpeg = MediaRenderService.FindTool("ffmpeg.exe");
 var ffprobe = MediaRenderService.FindTool("ffprobe.exe");
 var notes = new List<string>();
@@ -234,6 +243,7 @@ Check(hashes.All(pair => SHA256.HashData(File.ReadAllBytes(pair.Key)).SequenceEq
 await AudioContinuityChecks.Run(Path.Combine(folder, "audio-continuity"), Check);
 await AudioPreviewCacheChecks.Run(Path.Combine(folder, "audio-preview-cache"), Check);
 await AudioTimelinePreviewChecks.Run(Path.Combine(folder, "audio-timeline-preview"), Check);
+await PerformanceChecks.Run(Path.Combine(folder, "performance"), Check);
 await File.WriteAllLinesAsync(Path.Combine(folder, "render-result.txt"), notes);
 Console.WriteLine($"{notes.Count}/{notes.Count} render integration checks passed. Artifacts: {folder}");
 

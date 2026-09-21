@@ -53,7 +53,7 @@
                 <TextBlock Text="CutMaker" FontSize="25" FontWeight="SemiBold" VerticalAlignment="Center" />
                 <TextBlock Text="專注每一段畫面與聲音" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="18,0,0,0" />
             </StackPanel>
-            <TextBlock Grid.Column="1" Text="0.7.1 · Fade 即時拖曳" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="0.8.0 · 性能與操作" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" />
         </Grid>
         <WrapPanel x:Name="ProjectToolbar" Grid.Row="1">
             <Button Content="新增專案" Click="New_Click" ToolTip="Ctrl+N" />
@@ -67,6 +67,9 @@
             <Button x:Name="ExportButton" Content="匯出 MP4／MP3" Click="Export_Click" Background="#24534D" />
             <Button x:Name="CancelRenderButton" Content="取消匯出" Click="CancelRender_Click" Visibility="Collapsed" />
             <Button Content="重設版面" Click="ResetLayout_Click" />
+            <Button Content="預覽與快取" Click="Performance_Click" />
+            <Button Content="快捷鍵" Click="Shortcuts_Click" ToolTip="快捷鍵與滑鼠操作 · F1" />
+            <Button x:Name="OpenExportFolderButton" Content="開啟匯出位置" Click="OpenExportFolder_Click" IsEnabled="False" ToolTip="在檔案總管選取上次成功匯出的檔案" />
             <ProgressBar x:Name="RenderProgressBar" Width="100" Height="5" Minimum="0" Maximum="100" VerticalAlignment="Center" Visibility="Collapsed" />
         </WrapPanel>
         <Grid x:Name="Workspace" Grid.Row="2" Margin="0,10,0,0">
@@ -243,11 +246,14 @@
                     <Button Content="＋ 音訊軌" Click="AddAudio_Click" Padding="12,6" />
                     <Button x:Name="RemoveClipButton" Content="移除片段" Click="RemoveClip_Click" Padding="12,6" IsEnabled="False" ToolTip="選取片段後按 Delete；來源檔案會保留" />
                     <Button x:Name="SplitClipButton" Content="切割" Click="SplitClip_Click" Padding="12,6" ToolTip="將選取片段在播放頭位置切開 · Ctrl+B" />
+                    <Button Content="試聽接點" Click="Audition_Click" Padding="12,6" ToolTip="播放播放頭前後各 2 秒 · Ctrl+Shift+Space" />
                     <Menu Background="Transparent" Foreground="#EAF0FA" Margin="0,0,8,8" VerticalAlignment="Center">
                         <MenuItem Header="編輯 ▾" Padding="8,7" Background="#253247" Foreground="#EAF0FA">
                             <MenuItem.Resources><Style TargetType="MenuItem"><Setter Property="Foreground" Value="#17202E" /></Style></MenuItem.Resources>
                             <MenuItem Header="全選片段" InputGestureText="Ctrl+A" Click="SelectAllClips_Click" />
                             <MenuItem Header="取消選取" InputGestureText="Esc" Click="ClearSelection_Click" />
+                            <MenuItem Header="試聽接點（前後各 2 秒）" InputGestureText="Ctrl+Shift+Space" Click="Audition_Click" />
+                            <MenuItem x:Name="AuditionLoopMenuItem" Header="循環試聽接點" IsCheckable="True" Click="AuditionLoop_Click" />
                             <MenuItem Header="剪下" InputGestureText="Ctrl+X" Click="CutClips_Click" />
                             <MenuItem Header="複製" InputGestureText="Ctrl+C" Click="CopyClips_Click" />
                             <MenuItem Header="貼到播放頭" InputGestureText="Ctrl+V" Click="PasteClips_Click" />
@@ -319,6 +325,13 @@
                     <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Center" VerticalAlignment="Stretch" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" DragDelta="TrackHeader_DragDelta" DragCompleted="Splitter_DragCompleted" AutomationProperties.Name="調整軌道名稱寬度" />
                     <Canvas Grid.ColumnSpan="3" IsHitTestVisible="False" ClipToBounds="True">
                         <Rectangle x:Name="TimelineMarqueeRect" Visibility="Collapsed" Fill="#2878DCCB" Stroke="#78DCCB" StrokeThickness="1" />
+                        <Line x:Name="TimelineSnapLine" Visibility="Collapsed" Stroke="#78DCCB" StrokeThickness="1.5" StrokeDashArray="4,3" />
+                        <Border x:Name="TimelineSnapLabel" Visibility="Collapsed" Background="#E513202B" Padding="5,2" CornerRadius="3">
+                            <TextBlock x:Name="TimelineSnapText" Foreground="#78DCCB" FontSize="11" />
+                        </Border>
+                        <Border x:Name="TimelineDragHint" Visibility="Collapsed" Background="#F01B2636" BorderBrush="#78DCCB" BorderThickness="1" Padding="7,5" CornerRadius="4" MaxWidth="320">
+                            <TextBlock x:Name="TimelineDragHintText" Foreground="#ECF4FF" FontSize="11" TextWrapping="Wrap" />
+                        </Border>
                     </Canvas>
                 </Grid>
                 <Grid Grid.Row="3">

@@ -43,6 +43,7 @@ public partial class MainWindow : Window
         Deactivated += (_, _) => ResetLibraryDragCandidate();
         InitializeRecovery();
         InitializeMediaVisuals();
+        InitializeInteraction();
     }
 
     private static CutProject CreateProject() => CutProject.CreateEmpty("未命名專案") with
@@ -94,6 +95,7 @@ public partial class MainWindow : Window
             _projectPath = dialog.FileName;
             _dirty = false;
             RefreshProject();
+            RestoreProjectView();
             var missing = _project.MediaAssets.Count(asset => !File.Exists(ProjectStore.ResolveAssetPath(_projectPath, asset)));
             StatusText.Text = missing == 0 ? "專案已開啟" : $"專案已開啟 · {missing} 個素材目前找不到，剪輯資料已保留";
         }
@@ -138,6 +140,7 @@ public partial class MainWindow : Window
             _projectPath = target;
             _dirty = false;
             RecoveryProjectSaved();
+            SaveProjectView();
             RefreshProject();
             StatusText.Text = "專案已儲存";
             return true;
@@ -189,11 +192,14 @@ public partial class MainWindow : Window
             _ => e.Key
         };
         var modifiers = Keyboard.Modifiers;
+        if (key == Key.F1 && modifiers == ModifierKeys.None && _pointerOriginal is null)
+        { Shortcuts_Click(this, e); e.Handled = true; return; }
         if (TryHandleTransportKey(key, modifiers, e.OriginalSource as DependencyObject ?? Keyboard.FocusedElement as DependencyObject, e.IsRepeat))
         { e.Handled = true; return; }
         var timelineFocus = Keyboard.FocusedElement is TimelineLane or TimelineRuler;
         if (key == Key.Escape && modifiers == ModifierKeys.None)
         {
+            if (_panElement is not null) { CancelTimelinePan(); e.Handled = true; return; }
             if (IsMarqueeSelecting) { EndMarqueeSelection(cancel: true); e.Handled = true; return; }
             if (_pointerOriginal is not null) { CancelPointerEdit(); StatusText.Text = "已取消拖曳"; e.Handled = true; return; }
             if (timelineFocus) { ClearSelection_Click(this, e); e.Handled = true; return; }
@@ -225,6 +231,7 @@ public partial class MainWindow : Window
         { RemoveSelectedClip(); e.Handled = true; return; }
         if (modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
         {
+            if (key == Key.Space && navigationFocus && !e.IsRepeat) { Audition_Click(this, e); e.Handled = true; return; }
             if (key == Key.S) { SaveProject(true); e.Handled = true; }
             else if (key == Key.Z && Keyboard.FocusedElement is not TextBoxBase) { RedoEdit(); e.Handled = true; }
             return;

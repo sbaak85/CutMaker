@@ -13,7 +13,6 @@ public partial class MainWindow
     private readonly List<EditSnapshot> _undo = [];
     private readonly List<EditSnapshot> _redo = [];
     private string? _selectedTrackId;
-    private enum PointerEdit { Move, TrimStart, TrimEnd, FadeIn, FadeOut }
     private Clip? _pointerOriginal;
     private Clip? _pointerCandidate;
     private TimelineLane? _pointerLane;
@@ -22,6 +21,10 @@ public partial class MainWindow
     private double _pointerDownTime;
     private double _pointerGrabOffset;
     private bool _pointerMoved;
+    private double _pointerRawTime;
+    private double _pointerEffectiveTime;
+    private double? _snapGuideTime;
+    private string? _snapGuideLabel;
 
     // Snapshots own their lists; record items are immutable. Absolute paths keep Undo safe after Save As.
     private EditSnapshot CaptureEdit() => new(_project with
@@ -218,17 +221,10 @@ public partial class MainWindow
     private void BeginPointerEdit(TimelineLane lane, Clip clip, Point point)
     {
         if (lane.IsLocked) return;
-        var left = (clip.Start - TimelineOffsetSeconds) * TimelinePixelsPerSecond;
-        var right = (clip.End - TimelineOffsetSeconds) * TimelinePixelsPerSecond;
-        var edge = Math.Min(8, (right - left) / 4);
-        var fadeInHandle = Math.Clamp(left + (clip.FadeIn?.Duration ?? 0) * TimelinePixelsPerSecond, left + edge, right - edge);
-        var fadeOutHandle = Math.Clamp(right - (clip.FadeOut?.Duration ?? 0) * TimelinePixelsPerSecond, left + edge, right - edge);
-        _pointerMode = point.Y <= lane.FadeHandleHitHeight && Math.Abs(point.X - fadeInHandle) <= 6 ? PointerEdit.FadeIn
-            : point.Y <= lane.FadeHandleHitHeight && Math.Abs(point.X - fadeOutHandle) <= 6 ? PointerEdit.FadeOut
-            : Math.Abs(point.X - left) <= edge ? PointerEdit.TrimStart
-            : Math.Abs(point.X - right) <= edge ? PointerEdit.TrimEnd : PointerEdit.Move;
+        _pointerMode = lane.HitEdit(clip.Start, clip.Duration, clip.FadeIn?.Duration ?? 0, clip.FadeOut?.Duration ?? 0, point);
         _pointerOriginal = clip; _pointerCandidate = null; _pointerLane = lane; _pointerOrigin = point;
         _pointerDownTime = TimelineOffsetSeconds + point.X / TimelinePixelsPerSecond;
+        _pointerRawTime = _pointerEffectiveTime = _pointerDownTime;
         _pointerGrabOffset = _pointerDownTime - clip.Start;
         if (_pointerMode == PointerEdit.FadeIn) _pointerGrabOffset -= clip.FadeIn?.Duration ?? 0;
         else if (_pointerMode == PointerEdit.FadeOut) _pointerGrabOffset -= clip.Duration - (clip.FadeOut?.Duration ?? 0);
@@ -269,14 +265,20 @@ public partial class MainWindow
         e.Handled = true;
     }
 
-    private void UpdatePointerEditAt(TimelineLane? target, Point point)
+    private void UpdatePointerEditAt(TimelineLane? target, Point point, ModifierKeys? modifiers = null)
     {
         if (_pointerOriginal is not { } original || _pointerLane is null) return;
+        MediaWorkScheduler.NotifyInteraction();
         _pointerMoved = true;
         foreach (var lane in FindLanes(TrackItems)) lane.SetDropPreview(null, 0, false);
-        if (target is null) { _pointerCandidate = null; StatusText.Text = "請將片段拖至相容軌道內"; return; }
+        if (target is null) { _pointerCandidate = null; HidePointerFeedback(); StatusText.Text = "請將片段拖至相容軌道內"; return; }
         ScrollDuringDrag(point.X, target.ActualWidth);
         var rawTime = Math.Max(0, TimelineOffsetSeconds + point.X / TimelinePixelsPerSecond);
+        var fine = (modifiers ?? Keyboard.Modifiers).HasFlag(ModifierKeys.Shift);
+        _pointerEffectiveTime += (rawTime - _pointerRawTime) * (fine ? .1 : 1);
+        _pointerRawTime = rawTime;
+        rawTime = Math.Max(0, _pointerEffectiveTime);
+        _snapGuideTime = null; _snapGuideLabel = null;
         try
         {
             var next = _pointerMode switch
@@ -302,8 +304,16 @@ public partial class MainWindow
             var action = _pointerMode switch { PointerEdit.Move => "移動", PointerEdit.FadeIn => $"淡入 {next.FadeIn!.Duration:0.###} 秒", PointerEdit.FadeOut => $"淡出 {next.FadeOut!.Duration:0.###} 秒", _ => "修剪" };
             StatusText.Text = allowed ? $"{action} · 起點 {FormatDuration(next.Start)} · 長度 {FormatDuration(next.Duration)} · 放開套用"
                 : reason;
+            var change = _pointerMode switch
+            {
+                PointerEdit.FadeIn => (next.FadeIn?.Duration ?? 0) - (original.FadeIn?.Duration ?? 0),
+                PointerEdit.FadeOut => (next.FadeOut?.Duration ?? 0) - (original.FadeOut?.Duration ?? 0),
+                PointerEdit.TrimEnd => next.End - original.End,
+                _ => next.Start - original.Start
+            };
+            ShowPointerFeedback(target, point, allowed ? $"{action}{(fine ? " · 精細" : "")}\n起點 {next.Start:0.###} 秒 · 長度 {next.Duration:0.###} 秒 · Δ {change:+0.###;-0.###;0} 秒" : reason);
         }
-        catch (ProjectValidationException error) { _pointerCandidate = null; StatusText.Text = error.Message; }
+        catch (ProjectValidationException error) { _pointerCandidate = null; HidePointerFeedback(); StatusText.Text = error.Message; }
     }
 
     internal Clip PlanPointerTrim(Clip original, bool trimStart, double pointerDownTime, double pointerTime)
@@ -323,17 +333,22 @@ public partial class MainWindow
     internal double SnapEditTime(double time, string clipId, double duration = 0)
     {
         var result = TimelinePlacement.RoundToFrame(time, _project.Video.Fps);
+        _snapGuideTime = null; _snapGuideLabel = null;
         if (!ShouldSnapTimeline) return result;
         var tolerance = Math.Min(.25, 8 / TimelinePixelsPerSecond);
         var selected = SelectionIds();
-        var boundaries = _project.Clips.Where(clip => clip.Id != clipId && !selected.Contains(clip.Id)).SelectMany(clip => new[] { clip.Start, clip.End }).Prepend(0);
+        var boundaries = _project.Clips.Where(clip => clip.Id != clipId && !selected.Contains(clip.Id))
+            .SelectMany(clip => new[] { (Time: clip.Start, Label: "片段起點"), (Time: clip.End, Label: "片段終點") })
+            .Prepend((0d, "時間軸起點")).Append((PlayheadSeconds, "播放頭"));
         var primary = _project.Clips.FirstOrDefault(c => c.Id == clipId);
         var offsets = duration > 0 && primary is not null && selected.Contains(primary.Id)
             ? _project.Clips.Where(c => selected.Contains(c.Id)).SelectMany(c => new[] { c.Start - primary.Start, c.End - primary.Start }).ToArray()
             : duration > 0 ? new[] { 0.0, duration } : new[] { 0.0 };
-        var candidates = boundaries.SelectMany(edge => offsets.Select(offset => edge - offset)).Where(value => value >= 0);
-        var nearest = candidates.MinBy(value => Math.Abs(value - result));
-        return Math.Abs(nearest - result) <= tolerance ? nearest : result;
+        var candidates = boundaries.SelectMany(edge => offsets.Select(offset => (Time: edge.Item1 - offset, Edge: edge.Item1, Label: edge.Item2))).Where(value => value.Time >= 0);
+        var nearest = candidates.MinBy(value => Math.Abs(value.Time - result));
+        if (Math.Abs(nearest.Time - result) > tolerance) return result;
+        _snapGuideTime = nearest.Edge; _snapGuideLabel = nearest.Label;
+        return nearest.Time;
     }
 
     private void TimelineLane_MouseUp(object sender, MouseButtonEventArgs e)
@@ -353,6 +368,7 @@ public partial class MainWindow
     {
         var lane = _pointerLane;
         _pointerOriginal = null; _pointerCandidate = null; _pointerLane = null; _pointerMoved = false;
+        HidePointerFeedback();
         if (lane is not null) { lane.Cursor = Cursors.Arrow; if (lane.IsMouseCaptured) lane.ReleaseMouseCapture(); }
         if (TrackItems is not null) foreach (var item in FindLanes(TrackItems)) item.SetDropPreview(null, 0, false);
     }

@@ -65,9 +65,13 @@ public partial class MainWindow
                     ReportAudioPreviewFailure(audioError);
                     return;
                 }
+                MediaWorkScheduler.NotifyInteraction();
+                PreviewHint.Visibility = _audioDevice?.IsBuffering == true ? Visibility.Visible : Visibility.Collapsed;
+                if (_audioDevice?.IsBuffering == true) PreviewHint.Text = "正在補充來源音訊，完成後接續播放…";
                 var position = PreviewPositionSeconds;
                 _previewPlaybackFarthest = Math.Max(_previewPlaybackFarthest, position);
                 PlayheadSeconds = Math.Clamp(_previewRangeStart + position, 0, PreviewDuration);
+                if (CheckAuditionEnd(_previewRangeStart + position)) return;
                 if (_audioDevice is { Ended: true })
                 {
                     PausePreview();
@@ -103,19 +107,29 @@ public partial class MainWindow
         Tracks = [.. _project.Tracks], Clips = [.. _project.Clips]
     };
 
+    private static string PreviewContentKey(CutProject snapshot) => PreviewRenderCache.CreateKey(snapshot) +
+        (PreviewRenderCache.IsAudioOnly(snapshot) ? "" : $"|{EditorPreferences.Current.PreviewWidth}|{EditorPreferences.Current.UseVideoProxies}");
+
     // Names, locks, selection and lossless razor cuts do not change the rendered sound.
     // Keep both the playing clock and an in-flight preload when the content is identical.
     private void RefreshPreviewAfterEdit()
     {
         if (_previewRenderKey is not null && (PreviewIsReady || _previewPreparing) &&
-            _previewRenderKey == PreviewRenderCache.CreateKey(CreatePreviewSnapshot()))
+            _previewRenderKey == PreviewContentKey(CreatePreviewSnapshot()))
         { RefreshPreviewControls(); return; }
+        if (_previewPlaying && _audioPreview is { } live && _audioDevice is { } device &&
+            live.TryUpdateControls(CreatePreviewSnapshot(), device.PositionFrames + PcmAudioDevice.BlockFrames * PcmAudioDevice.QueueBlocks))
+        {
+            _previewRenderKey = PreviewContentKey(CreatePreviewSnapshot());
+            RefreshPreviewControls(); return;
+        }
         InvalidatePreview();
     }
 
     /// <summary>Stop stale playback, retaining finished content caches for replay/undo.</summary>
     internal void InvalidatePreview()
     {
+        ClearAudition(resetDevice: false);
         _previewRevision++;
         _previewFrameRequest++;
         _previewFrameCancellation?.Cancel();
@@ -161,8 +175,9 @@ public partial class MainWindow
     private async void PreviewPlay_Click(object sender, RoutedEventArgs e) => await TogglePreviewPlaybackAsync();
     private async Task TogglePreviewPlaybackAsync()
     {
+        _auditionRequest++;
         EndPreviewScrub(resumePlayback: false);
-        if (_previewRenderKey is not null && _previewRenderKey != PreviewRenderCache.CreateKey(CreatePreviewSnapshot()))
+        if (_previewRenderKey is not null && _previewRenderKey != PreviewContentKey(CreatePreviewSnapshot()))
             InvalidatePreview();
         if (_previewPreparing)
         {
@@ -177,6 +192,7 @@ public partial class MainWindow
     }
     private void PreviewStop_Click(object sender, RoutedEventArgs e)
     {
+        ClearAudition();
         // Stop the playback intent, but let the reusable preload finish in the background.
         _previewPlayWhenReady = false;
         PausePreview();
@@ -193,8 +209,9 @@ public partial class MainWindow
     {
         if (!_previewInitialized || _previewShutdown || _previewPreparing) return;
         if (PreviewDuration <= 0) { StatusText.Text = "請先將素材放入軌道"; return; }
+        using var foreground = MediaWorkScheduler.Foreground();
         var snapshot = CreatePreviewSnapshot();
-        var key = PreviewRenderCache.CreateKey(snapshot);
+        var key = PreviewContentKey(snapshot);
         if (PreviewIsReady && _previewRenderKey == key)
         {
             if (PlayheadSeconds >= PreviewDuration - 0.00001) SeekPreview(0);
@@ -239,12 +256,12 @@ public partial class MainWindow
                 // Yield once so pending transport/navigation input remains responsive even
                 // when all decoded source files are already cached.
                 await Task.Yield();
-                var audio = await AudioTimelinePreview.PrepareAsync(snapshot, progress, cancellation.Token);
+                var audio = await AudioTimelinePreview.PrepareAsync(snapshot, progress, cancellation.Token, startSeconds: PlayheadSeconds);
                 try
                 {
                     cancellation.Token.ThrowIfCancellationRequested();
                     if (_previewShutdown || revision != _previewRevision) return;
-                    if (key != PreviewRenderCache.CreateKey(snapshot)) throw new IOException("來源檔案在載入期間已變更，請重新播放。");
+                    if (key != PreviewContentKey(snapshot)) throw new IOException("來源檔案在載入期間已變更，請重新播放。");
                     phase = "開啟音訊裝置";
                     var device = new PcmAudioDevice((frame, buffer, count) => { audio.ReadFrames(frame, buffer, count); },
                         audio.DurationFrames, muted: PreviewPlayer.IsMuted);
@@ -264,11 +281,11 @@ public partial class MainWindow
                 finally { if (!ReferenceEquals(_audioPreview, audio)) audio.Dispose(); }
             }
             if (!reused)
-                await MediaRenderService.RenderAsync(snapshot, null, output, new MediaRenderOptions(Preview: true,
-                    OutputStart: _previewRangeStart, OutputEnd: _previewRangeEnd), progress, cancellation.Token);
+                await VideoRegionPreview.RenderAsync(snapshot, output, EditorPreferences.Current.PreviewWidth,
+                    EditorPreferences.Current.UseVideoProxies, progress, cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
             if (_previewShutdown || revision != _previewRevision) return;
-            if (key != PreviewRenderCache.CreateKey(snapshot))
+            if (key != PreviewContentKey(snapshot))
                 throw new IOException("來源檔案在準備期間已變更，請重新播放以更新快取。");
             PreviewCache.Add(key, output);
             ReplacePreviewPlayer();
@@ -285,7 +302,7 @@ public partial class MainWindow
             PreviewPlayer.Play();
             await _previewOpenCompletion.Task.WaitAsync(TimeSpan.FromSeconds(15), cancellation.Token);
             if (_previewShutdown || revision != _previewRevision) return;
-            if (key != PreviewRenderCache.CreateKey(snapshot))
+            if (key != PreviewContentKey(snapshot))
                 throw new IOException("來源檔案在開啟期間已變更，請重新播放以更新快取。");
             StatusText.Text = reused ? "已重用預覽快取，可直接定位與重播" : "完整預覽已暫存，可直接定位與重播";
             PreviewDiagnostics.Write("video-ready", $"revision={revision}; elapsedMs={started.ElapsedMilliseconds}");
@@ -378,6 +395,7 @@ public partial class MainWindow
         // A clock sample from this Play/Seek session can still prove the full tail ran.
         var reached = Math.Max(PreviewPlayer.Position.TotalSeconds, _previewPlaybackFarthest);
         if (Math.Abs(reached - duration) > Math.Min(.12, duration / 4)) return;
+        if (CheckAuditionEnd(_previewRangeEnd)) return;
         PausePreview();
         PlayheadSeconds = _previewRangeEnd;
     }
@@ -412,6 +430,7 @@ public partial class MainWindow
         var mixer = _audioPreview;
         _audioDevice = null;
         _audioPreview = null;
+        mixer?.CancelPendingReads();
         try { device?.Dispose(); }
         catch (Exception ex) { PreviewDiagnostics.Write("audio-close-failed", ex.ToString()); }
         finally { mixer?.Dispose(); }
@@ -468,6 +487,7 @@ public partial class MainWindow
 
     private void QueuePreviewFrame()
     {
+        MediaWorkScheduler.NotifyInteraction();
         _previewFrameCancellation?.Cancel();
         if (!_previewInitialized || _previewShutdown || PreviewDuration <= 0 || _previewPreparing) return;
         if (PreviewRenderCache.IsAudioOnly(_project))
@@ -492,6 +512,7 @@ public partial class MainWindow
         {
             // Coalesce mouse motion; canceled requests never publish their frame or status.
             await Task.Delay(110, cancellation.Token);
+            using var foreground = MediaWorkScheduler.Foreground();
             var duration = PreviewDuration;
             var fps = Math.Min(30, _project.Video.Fps);
             var time = Math.Max(0, Math.Min(seconds, TimelineNavigation.StepFrame(duration, -1, _project.Video.Fps, duration)));
@@ -538,9 +559,10 @@ public partial class MainWindow
         }
     }
 
-    internal void SeekPreview(double seconds)
+    internal void SeekPreview(double seconds, bool preserveAudition = false)
     {
         if (!double.IsFinite(seconds)) return;
+        if (!preserveAudition) { _auditionRequest++; ClearAudition(); }
         PlayheadSeconds = Math.Clamp(seconds, 0, PreviewDuration);
         _previewPlaybackFarthest = Math.Max(0, PlayheadSeconds - _previewRangeStart);
         if (PreviewIsReady && (PreviewContains(PlayheadSeconds) || PlayheadSeconds == _previewRangeEnd))
@@ -722,6 +744,7 @@ public partial class MainWindow
             await RunPreviewCacheSmokeAsync(folder);
             SeekPreview(0);
             await PreparePreviewAsync();
+            using var foreground = MediaWorkScheduler.Foreground();
             var duration = PreviewDuration;
             var naturalDuration = PreviewPlayer.NaturalDuration.TimeSpan.TotalSeconds;
             var naturalWidth = PreviewPlayer.NaturalVideoWidth;

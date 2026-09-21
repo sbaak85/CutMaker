@@ -5,7 +5,7 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>CutMaker</AssemblyName>
     <RootNamespace>CutMaker.App</RootNamespace>
-    <Version>0.7.1</Version>
+    <Version>0.8.0</Version>
     <Description>CutMaker lightweight video and audio editor</Description>
   </PropertyGroup>
   <ItemGroup>

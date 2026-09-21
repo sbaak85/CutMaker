@@ -17,25 +17,32 @@ internal sealed class AudioTimelinePreview : IDisposable
     private const int BlockFrames = 4096;
     private readonly object _sync = new();
     private readonly Source[] _sources;
-    private readonly Fragment[] _fragments;
+    private Fragment[] _fragments;
+    private string? _controlShapeKey;
     private bool _disposed;
 
-    private sealed class Source(string path, long firstFrame, AudioPreviewCache.Lease? lease, bool owned) : IDisposable
+    private sealed class Source(string path, long firstFrame, AudioPreviewCache.Lease? lease, bool owned, ProgressiveAudioSource? progressive = null) : IDisposable
     {
-        internal FileStream Reader { get; } = new(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+        internal FileStream Reader { get; } = progressive?.Reader ?? new(path, FileMode.Open, FileAccess.Read, FileShare.Read,
             bufferSize: 1, options: FileOptions.RandomAccess);
         internal long FirstFrame { get; } = firstFrame;
-        internal long Frames => Reader.Length / AudioPreviewCache.BytesPerFrame;
+        internal long Frames => progressive?.AvailableFrames ?? Reader.Length / AudioPreviewCache.BytesPerFrame;
+        internal int Readable(long first, int count) => progressive?.ReadableFrames(first, count) ?? (int)Math.Min(count, Math.Max(0, Frames - first));
+        internal void Cancel() => progressive?.Cancel();
 
         public void Dispose()
         {
+            progressive?.Dispose();
             Reader.Dispose();
             lease?.Dispose();
             if (owned) DeleteTemporary(path);
         }
     }
 
-    private sealed record Fragment(Clip Clip, AudioSampleSlice Slice, double Gain, Source Source);
+    private sealed record Fragment(Clip Clip, AudioSampleSlice Slice, double Gain, Source Source, double PreviousGain = -1, long TransitionStart = 0)
+    {
+        internal double GainAt(long frame) => PreviousGain < 0 ? Gain : PreviousGain + (Gain - PreviousGain) * Math.Clamp((frame - TransitionStart) / 240.0, 0, 1);
+    }
 
     private AudioTimelinePreview(long durationFrames, Source[] sources, Fragment[] fragments)
     {
@@ -48,7 +55,7 @@ internal sealed class AudioTimelinePreview : IDisposable
 
     internal static async Task<AudioTimelinePreview> PrepareAsync(CutProject absoluteSnapshot,
         IProgress<MediaRenderProgress>? progress = null, CancellationToken cancellationToken = default,
-        AudioPreviewCache? cache = null)
+        AudioPreviewCache? cache = null, double startSeconds = 0)
     {
         // Own the lists even when a caller did not already make a snapshot.
         var project = absoluteSnapshot with
@@ -57,12 +64,12 @@ internal sealed class AudioTimelinePreview : IDisposable
             Clips = [.. absoluteSnapshot.Clips]
         };
         ProjectValidator.Validate(project);
+        var controlShapeKey = ControlShapeKey(project);
         cancellationToken.ThrowIfCancellationRequested();
         var duration = project.Clips.Count == 0 ? 0 : project.Clips.Max(clip => clip.End);
         var assets = project.MediaAssets.ToDictionary(asset => asset.Id);
         var tracks = project.Tracks.ToDictionary(track => track.Id);
-        var audible = project.Clips.Where(clip => !tracks[clip.TrackId].Muted && !clip.SourceAudioMuted &&
-            clip.Gain > 0 && tracks[clip.TrackId].Volume > 0 && assets[clip.AssetId].Kind != MediaKind.Image).ToArray();
+        var audible = project.Clips.Where(clip => !clip.SourceAudioMuted && assets[clip.AssetId].Kind != MediaKind.Image).ToArray();
         var sources = new Dictionary<string, Source>(StringComparer.OrdinalIgnoreCase);
         var fragments = new List<Fragment>();
         long ownedBytes = 0;
@@ -77,14 +84,26 @@ internal sealed class AudioTimelinePreview : IDisposable
                 var slices = group.Select(clip => (Clip: clip, Slice: AudioSampleClock.Slice(clip, 0, duration)))
                     .Where(item => item.Slice.Length > 0).ToArray();
                 if (slices.Length == 0) continue;
-                var lease = await (cache ?? AudioPreviewCache.Shared).AcquireAsync(group.Key, asset.Duration,
-                    ffmpeg, progress, cancellationToken).ConfigureAwait(false);
+                var sourceCache = cache ?? AudioPreviewCache.Shared;
+                var lease = sourceCache.TryAcquireExisting(group.Key, ffmpeg);
                 Source source;
-                if (lease is not null)
+                if (lease is null && cache is null && asset.Duration > 300 &&
+                    (asset.Duration + 1) * AudioSampleClock.Rate * AudioPreviewCache.BytesPerFrame < EditorPreferences.Current.CacheBytes)
                 {
-                    try { source = new Source(lease.Path, 0, lease, owned: false); }
-                    catch { lease.Dispose(); throw; }
+                    var earliest = slices.Where(item => item.Clip.End > startSeconds).OrderBy(item => Math.Max(item.Clip.Start, startSeconds)).FirstOrDefault();
+                    var through = earliest.Clip is null ? 8 : earliest.Clip.SourceIn + Math.Max(0, startSeconds - earliest.Clip.Start) + 8;
+                    var progressive = await ProgressiveAudioSource.StartAsync(group.Key, ffmpeg, Math.Min(asset.Duration, through),
+                        checked((long)Math.Ceiling((asset.Duration + 1) * AudioSampleClock.Rate) * AudioPreviewCache.BytesPerFrame), progress, cancellationToken).ConfigureAwait(false);
+                    source = new Source(string.Empty, 0, null, owned: false, progressive);
                 }
+                else
+                {
+                    lease ??= await sourceCache.AcquireAsync(group.Key, asset.Duration, ffmpeg, progress, cancellationToken).ConfigureAwait(false);
+                    if (lease is not null)
+                    {
+                        try { source = new Source(lease.Path, 0, lease, owned: false); }
+                        catch { lease.Dispose(); throw; }
+                    }
                 else
                 {
                     // A busy/full shared cache must not silently omit this source. Keep only the
@@ -98,13 +117,14 @@ internal sealed class AudioTimelinePreview : IDisposable
                     source = await PrepareOwnedSourceAsync(group.Key, first, end, ffmpeg, progress, cancellationToken).ConfigureAwait(false);
                     ownedBytes += source.Reader.Length;
                 }
+                }
                 sources.Add(group.Key, source);
                 foreach (var (clip, slice) in slices)
-                    fragments.Add(new(clip, slice, clip.Gain * tracks[clip.TrackId].Volume, source));
+                    fragments.Add(new(clip, slice, tracks[clip.TrackId].Muted ? 0 : clip.Gain * tracks[clip.TrackId].Volume, source));
             }
             cancellationToken.ThrowIfCancellationRequested();
             progress?.Report(new(1, "音訊已就緒；播放時即時混音。"));
-            return new(AudioSampleClock.At(duration), sources.Values.ToArray(), fragments.ToArray());
+            return new(AudioSampleClock.At(duration), sources.Values.ToArray(), fragments.ToArray()) { _controlShapeKey = controlShapeKey };
         }
         catch
         {
@@ -145,7 +165,7 @@ internal sealed class AudioTimelinePreview : IDisposable
                         var finish = Math.Min(end, fragment.Slice.TimelineStart + fragment.Slice.Length);
                         if (finish <= begin) continue;
                         var sourceFirst = fragment.Slice.SourceStart + begin - fragment.Slice.TimelineStart - fragment.Source.FirstFrame;
-                        var sourceCount = (int)Math.Min(finish - begin, Math.Max(0, fragment.Source.Frames - sourceFirst));
+                        var sourceCount = fragment.Source.Readable(sourceFirst, (int)(finish - begin));
                         if (sourceFirst < 0) throw new IOException("音訊預覽的來源範圍無效。");
                         if (sourceCount == 0) continue; // A codec can end slightly before its container duration.
                         ReadSource(fragment.Source.Reader, sourceFirst, sourceSamples.AsSpan(0, sourceCount * 2));
@@ -153,7 +173,7 @@ internal sealed class AudioTimelinePreview : IDisposable
                         for (var frame = 0; frame < sourceCount; frame++)
                         {
                             var localSeconds = (begin + frame) / (double)AudioSampleClock.Rate - fragment.Clip.Start;
-                            var gain = fragment.Gain * FadeEnvelope.Gain(fragment.Clip, localSeconds, audio: true);
+                            var gain = fragment.GainAt(begin + frame) * FadeEnvelope.Gain(fragment.Clip, localSeconds, audio: true);
                             mix[target + frame * 2] += sourceSamples[frame * 2] * gain;
                             mix[target + frame * 2 + 1] += sourceSamples[frame * 2 + 1] * gain;
                         }
@@ -176,6 +196,32 @@ internal sealed class AudioTimelinePreview : IDisposable
             return available;
         }
     }
+
+    private static string ControlShapeKey(CutProject value) => PreviewRenderCache.CreateKey(value with
+        {
+            Tracks = value.Tracks.Select(track => track with { Muted = false, Volume = 1 }).ToList(),
+            Clips = value.Clips.Select(clip => clip with { Gain = 1 }).ToList()
+        });
+
+    internal bool TryUpdateControls(CutProject project, long frame)
+    {
+        lock (_sync)
+        {
+            if (_disposed || _controlShapeKey is null || ControlShapeKey(project) != _controlShapeKey) return false;
+            var tracks = project.Tracks.ToDictionary(track => track.Id);
+            var clips = project.Clips.ToDictionary(clip => clip.Id);
+            // Source-contiguous razor cuts can share a prepared plan; rebuild first if its identities changed.
+            if (_fragments.Any(fragment => !clips.ContainsKey(fragment.Clip.Id))) return false;
+            _fragments = _fragments.Select(fragment =>
+            {
+                var clip = clips[fragment.Clip.Id]; var track = tracks[clip.TrackId];
+                var target = track.Muted ? 0 : clip.Gain * track.Volume;
+                return fragment with { Clip = clip, PreviousGain = fragment.GainAt(frame), Gain = target, TransitionStart = frame };
+            }).ToArray();
+            return true;
+        }
+    }
+    internal void CancelPendingReads() { foreach (var source in _sources) source.Cancel(); }
 
     private static void ReadSource(FileStream reader, long startFrame, Span<double> samples)
     {

@@ -22,6 +22,7 @@ internal static class MediaVisualCache
     private static readonly ConcurrentDictionary<string, MediaVisualSet> Memory = new();
     private static readonly ConcurrentQueue<string> MemoryOrder = new();
     internal static string CacheDirectory => Path.Combine(LayoutSettings.DataDirectory, "media-visuals");
+    internal static void ClearMemory() { Memory.Clear(); while (MemoryOrder.TryDequeue(out _)) { } }
 
     internal static string GetKey(MediaAsset asset, string? projectPath)
     {
@@ -37,6 +38,7 @@ internal static class MediaVisualCache
         cancellationToken.ThrowIfCancellationRequested();
         var key = GetKey(asset, projectPath);
         if (Memory.TryGetValue(key, out var known)) return known;
+        using var scheduled = await MediaWorkScheduler.BackgroundAsync(cancellationToken).ConfigureAwait(false);
         await Workers.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -62,7 +64,7 @@ internal static class MediaVisualCache
                         if (asset.Kind == MediaKind.Video) args.AddRange(["-ss", Math.Min(.25, asset.Duration / 3).ToString("0.######", CultureInfo.InvariantCulture)]);
                         args.AddRange(["-i", path, "-map", "0:v:0", "-frames:v", "1", "-an", "-vf",
                             "scale=160:90:force_original_aspect_ratio=decrease,pad=160:90:(ow-iw)/2:(oh-ih)/2:black", "-threads", "1", "-update", "1", temporary]);
-                        await MediaRenderService.RunToolAsync(MediaRenderService.FindTool("ffmpeg.exe"), args, timeout.Token).ConfigureAwait(false);
+                        await MediaRenderService.RunToolAsync(MediaRenderService.FindTool("ffmpeg.exe"), args, timeout.Token, background: true).ConfigureAwait(false);
                         thumbnail = LoadBitmap(temporary);
                         if (thumbnail is not null) File.Move(temporary, target, overwrite: true);
                     }
@@ -94,22 +96,47 @@ internal static class MediaVisualCache
             Memory[key] = result;
             MemoryOrder.Enqueue(key);
             while (Memory.Count > 128 && MemoryOrder.TryDequeue(out var oldest)) Memory.TryRemove(oldest, out _);
+            ManagedMediaCache.Prune(EditorPreferences.Current.CacheBytes);
             return result;
         }
         finally { Workers.Release(); }
     }
 
-    private static async Task<float[]> ReadPeaksAsync(string path, double duration, CancellationToken token)
+    internal static async Task<BitmapSource> GetWaveDetailAsync(MediaAsset asset, string? projectPath, double start, double duration, CancellationToken token)
+    {
+        var key = ManagedMediaCache.Hash($"wave-detail-v1|{GetKey(asset, projectPath)}|{start:R}|{duration:R}");
+        if (Memory.TryGetValue(key, out var known) && known.Waveform is not null) return known.Waveform;
+        using var scheduled = await MediaWorkScheduler.BackgroundAsync(token).ConfigureAwait(false);
+        Directory.CreateDirectory(CacheDirectory);
+        var path = Path.Combine(CacheDirectory, key + "-detail.png");
+        var bitmap = LoadBitmap(path);
+        if (bitmap is null)
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(30));
+            bitmap = DrawWaveform(await ReadPeaksAsync(ResolvePath(asset, projectPath), duration, timeout.Token, start, 48000, 2048).ConfigureAwait(false));
+            SaveBitmap(bitmap, path);
+        }
+        token.ThrowIfCancellationRequested();
+        Memory[key] = new(null, bitmap); MemoryOrder.Enqueue(key);
+        while (Memory.Count > 128 && MemoryOrder.TryDequeue(out var oldest)) Memory.TryRemove(oldest, out _);
+        ManagedMediaCache.Prune(EditorPreferences.Current.CacheBytes);
+        return bitmap;
+    }
+
+    private static async Task<float[]> ReadPeaksAsync(string path, double duration, CancellationToken token,
+        double start = 0, int sampleRate = WaveSampleRate, int width = WaveWidth)
     {
         var info = new ProcessStartInfo(MediaRenderService.FindTool("ffmpeg.exe"))
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (var argument in new[] { "-hide_banner", "-nostdin", "-v", "error", "-threads", "1", "-i", path,
+        foreach (var argument in new[] { "-hide_banner", "-nostdin", "-v", "error", "-threads", "1", "-ss", start.ToString("G17", CultureInfo.InvariantCulture), "-i", path,
             "-t", duration.ToString("0.#########", CultureInfo.InvariantCulture), "-map", "0:a:0", "-vn", "-ac", "1", "-ar",
-            WaveSampleRate.ToString(CultureInfo.InvariantCulture), "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1" })
+            sampleRate.ToString(CultureInfo.InvariantCulture), "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1" })
             info.ArgumentList.Add(argument);
         using var process = new Process { StartInfo = info };
         token.ThrowIfCancellationRequested();
         if (!process.Start()) throw new IOException("無法啟動波形處理。");
+        MediaWorkScheduler.LowerPriority(process);
         using var registration = token.Register(() =>
         {
             try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
@@ -121,11 +148,11 @@ internal static class MediaVisualCache
             // Drain without accumulating unbounded FFmpeg output.
             while (await process.StandardError.ReadLineAsync().ConfigureAwait(false) is not null) { }
         });
-        var peaks = new float[WaveWidth];
+        var peaks = new float[width];
         var bytes = new byte[8192 + 3];
         var remaining = 0;
         long sample = 0;
-        var totalSamples = Math.Max(1, duration * WaveSampleRate);
+        var totalSamples = Math.Max(1, duration * sampleRate);
         try
         {
             while (true)
@@ -137,7 +164,7 @@ internal static class MediaVisualCache
                 for (var offset = 0; offset < usable; offset += sizeof(float))
                 {
                     var value = Math.Abs(BitConverter.ToSingle(bytes, offset));
-                    var bin = (int)Math.Clamp(sample++ / totalSamples * WaveWidth, 0, WaveWidth - 1);
+                    var bin = (int)Math.Clamp(sample++ / totalSamples * width, 0, width - 1);
                     if (float.IsFinite(value)) peaks[bin] = Math.Max(peaks[bin], Math.Clamp(value, 0, 1));
                 }
                 remaining = count - usable;
@@ -164,9 +191,9 @@ internal static class MediaVisualCache
 
     private static BitmapSource DrawWaveform(float[] peaks)
     {
-        var stride = WaveWidth * 4;
+        var stride = peaks.Length * 4;
         var pixels = new byte[stride * WaveHeight];
-        for (var x = 0; x < WaveWidth; x++)
+        for (var x = 0; x < peaks.Length; x++)
         {
             var half = Math.Max(0, (int)Math.Round(peaks[x] * (WaveHeight / 2 - 1)));
             for (var y = WaveHeight / 2 - half; y <= WaveHeight / 2 + half; y++)
@@ -175,7 +202,7 @@ internal static class MediaVisualCache
                 pixels[index] = 211; pixels[index + 1] = 226; pixels[index + 2] = 138; pixels[index + 3] = 255;
             }
         }
-        var bitmap = BitmapSource.Create(WaveWidth, WaveHeight, 96, 96, PixelFormats.Bgra32, null, pixels, stride);
+        var bitmap = BitmapSource.Create(peaks.Length, WaveHeight, 96, 96, PixelFormats.Bgra32, null, pixels, stride);
         bitmap.Freeze();
         return bitmap;
     }

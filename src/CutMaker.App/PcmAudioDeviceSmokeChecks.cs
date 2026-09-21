@@ -96,6 +96,42 @@ internal static class PcmAudioDeviceSmokeChecks
                 "Background PCM failure must stop safely without reporting a completed timeline.");
         }
         report.AppendLine("PASS Native PCM: background source failure reported without an unhandled thread exception.");
+        var ready = 0;
+        var progressiveRequests = new List<(long Start, int Count)>();
+        var progressiveLength = PcmAudioDevice.BlockFrames * 8L + 13;
+        using (var player = new PcmAudioDevice((start, samples, count) =>
+        {
+            if (start >= PcmAudioDevice.BlockFrames * 2L && Volatile.Read(ref ready) == 0) throw new AudioBufferPendingException();
+            lock (progressiveRequests) progressiveRequests.Add((start, count));
+            Array.Clear(samples);
+        }, progressiveLength, muted: true))
+        {
+            player.Start();
+            await WaitUntilAsync(() => player.IsBuffering, "Progressive producer did not expose its pending-data state.");
+            var at = player.PositionFrames;
+            await Task.Delay(80);
+            Require(player.Error is null && player.IsPlaying && at == player.PositionFrames,
+                "Waiting for source data must preserve playback intent and stop the sample clock.");
+            Volatile.Write(ref ready, 1);
+            await WaitUntilAsync(() => player.Ended, "Progressive producer did not resume after data became ready.");
+            long next = 0;
+            lock (progressiveRequests) foreach (var item in progressiveRequests)
+            { Require(item.Start == next, "Progressive buffering skipped or duplicated PCM frames."); next += item.Count; }
+            Require(next == progressiveLength && player.PositionFrames == progressiveLength && player.Error is null,
+                "Progressive playback did not preserve exact EOF.");
+        }
+        report.AppendLine("PASS Native PCM: pending progressive data freezes clock, then resumes the exact next sample without padding or omissions.");
+        using (var player = new PcmAudioDevice(Fill, length, muted: true))
+        {
+            var outPoint = PcmAudioDevice.SampleRate / 4 + 13;
+            player.SetPlaybackEnd(outPoint); player.Start();
+            await WaitUntilAsync(() => player.Ended, "Audition output limit did not stop playback.");
+            Require(player.PositionFrames == outPoint, "Audition must stop at the exact requested sample.");
+            player.SetPlaybackEnd(null); player.Start(length - 431);
+            await WaitUntilAsync(() => player.Ended, "Clearing audition range did not restore timeline EOF.");
+            Require(player.PositionFrames == length, "Audition changed the full timeline duration.");
+        }
+        report.AppendLine("PASS Native PCM: audition range stops at the exact sample and clearing it restores full EOF.");
         Directory.CreateDirectory(folder);
         await File.WriteAllTextAsync(Path.Combine(folder, "pcm-device-checks.txt"), report.ToString());
         return;

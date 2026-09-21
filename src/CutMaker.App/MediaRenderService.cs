@@ -11,7 +11,7 @@ namespace CutMaker.App;
 public enum ExportVideoQuality { Compact, Balanced, High }
 public sealed record MediaRenderOptions(bool Preview = false, int? Width = null, int? Height = null, double? Fps = null,
     ExportVideoQuality VideoQuality = ExportVideoQuality.Balanced, int AudioBitrateKbps = 192,
-    double? OutputStart = null, double? OutputEnd = null, bool FrameOnly = false);
+    double? OutputStart = null, double? OutputEnd = null, bool FrameOnly = false, bool VideoOnly = false);
 public sealed record MediaRenderProgress(double Fraction, string Message);
 public sealed record MediaRenderResult(string OutputPath, double Duration, int Width, int Height);
 
@@ -98,7 +98,7 @@ public static partial class MediaRenderService
         var cachedAudio = new Dictionary<string, AudioPreviewCache.Lease>();
         try
         {
-            if (options.Preview && !options.FrameOnly)
+            if (options.Preview && !options.FrameOnly && !options.VideoOnly)
             {
                 foreach (var assetId in clips.Where(clip => !clip.SourceAudioMuted && streams[clip.AssetId].Audio &&
                     assets[clip.AssetId].Kind != MediaKind.Image).Select(clip => clip.AssetId).Distinct())
@@ -157,7 +157,7 @@ public static partial class MediaRenderService
                 }
                 graph.Add($"{current}format=yuv420p[vout]");
             }
-            if (!options.FrameOnly)
+            if (!options.FrameOnly && !options.VideoOnly)
                 AddAudioGraph(arguments, graph, clips, paths, tracks, streams, assets, cachedAudio, rangeStart, rangeEnd, ref inputCount);
             await File.WriteAllTextAsync(filterPath, string.Join(";\n", graph), new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
             arguments.AddRange(["-/filter_complex", filterPath]);
@@ -166,8 +166,8 @@ public static partial class MediaRenderService
             {
                 var crf = options.VideoQuality switch { ExportVideoQuality.Compact => "26", ExportVideoQuality.High => "17", _ => "20" };
                 if (!audioOnly) arguments.AddRange(["-map", "[vout]", "-c:v", "libx264", "-preset", options.Preview ? "ultrafast" : "veryfast", "-crf", options.Preview ? "25" : crf, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-threads", "4"]);
-                arguments.AddRange(["-map", "[aout]", "-c:a", wave ? options.Preview ? "pcm_s16le" : "pcm_f32le" : mp3 ? "libmp3lame" : "aac"]);
-                if (!wave) arguments.AddRange(["-b:a", $"{options.AudioBitrateKbps}k"]);
+                if (!options.VideoOnly) arguments.AddRange(["-map", "[aout]", "-c:a", wave ? options.Preview ? "pcm_s16le" : "pcm_f32le" : mp3 ? "libmp3lame" : "aac"]);
+                if (!wave && !options.VideoOnly) arguments.AddRange(["-b:a", $"{options.AudioBitrateKbps}k"]);
                 var audioDuration = (AudioSampleClock.At(rangeEnd) - AudioSampleClock.At(rangeStart)) / (double)AudioSampleClock.Rate;
                 arguments.AddRange(["-ar", "48000", "-ac", "2", "-t", Exact(audioDuration)]);
             }
@@ -211,13 +211,14 @@ public static partial class MediaRenderService
     }
 
     internal static async Task<string> RunToolAsync(string executable, IEnumerable<string> arguments, CancellationToken cancellationToken,
-        Action<string>? onOutput = null)
+        Action<string>? onOutput = null, bool background = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var info = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
         using var process = new Process { StartInfo = info };
         if (!process.Start()) throw new IOException("無法啟動媒體引擎。");
+        if (background) MediaWorkScheduler.LowerPriority(process);
         using var registration = cancellationToken.Register(() =>
         {
             try { if (!process.HasExited) process.Kill(entireProcessTree: true); }

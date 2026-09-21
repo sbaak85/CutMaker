@@ -1,5 +1,15 @@
 # Architecture
 
+## 0.8 performance and interaction paths
+
+`TimelineTrackRow` retains item containers; `TimelineLane` caches its static drawing and redraws playhead/hover/gesture overlays separately. Sorted non-overlapping clips permit a binary search into the horizontal viewport. `MainWindow.WaveDetails` debounces 2048-bin local waveform requests and maps them in source coordinates. `MediaWorkScheduler` admits one optional overview decoder after foreground work/interaction becomes idle; active optional processes run below normal priority.
+
+`ProgressiveAudioSource` decodes long sources from zero, publishes flushed complete sample frames, and reserves bounded disk capacity. Pending reads throw a distinct signal; `PcmAudioDevice` pauses its sample clock until data exists. Completed files are atomically published into the shared source cache. Live audio gain changes retain the device and ramp over 240 samples; a preparation-time source identity prevents accepting controls against externally replaced media.
+
+`ManagedMediaCache` owns only hash-named generated media in named cache directories. Leases prevent deleting active files. Preferences set a 1–32 GiB soft budget; session final previews and bounded fallback source ranges are separate. `VideoRegionPreview` renders frame-aligned approximately ten-second visual regions, reuses unchanged keys, and combines them with one uninterrupted audio render/encode. It does not switch players at region boundaries. Optional proxies affect visuals only. Export remains on original sources.
+
+Pointer hit areas, precision scaling, snap guides and numeric hints share the actual edit candidates. Fade presets apply an atomic batch. Junction audition uses a sample-accurate audio end limit and reuses the same device on loops; video stopping is timer-driven. Per-project sidecar view files and global preferences live outside project documents. F1 documents input focus rules. These replace the session-only view and full-video-rebuild behavior described in older design notes below.
+
 ## Foundation
 
 - .NET 10 WPF on Windows x64; native resizable panels, no embedded browser or NuGet packages.

@@ -28,6 +28,7 @@ internal sealed class PcmAudioDevice : IDisposable
     private readonly object _gate = new();
     private readonly FillPcm16 _fill;
     private readonly long _lengthFrames;
+    private long _endFrame;
     private readonly bool _muted;
     private readonly AutoResetEvent _wake = new(false);
     private readonly List<AudioBlock> _blocks = [];
@@ -41,6 +42,8 @@ internal sealed class PcmAudioDevice : IDisposable
     private ulong _clockWrap;
     private bool _playing;
     private bool _ended;
+    private bool _buffering;
+    internal bool IsBuffering { get { lock (_gate) return _buffering; } }
     private bool _disposed;
     private Exception? _error;
 
@@ -50,6 +53,7 @@ internal sealed class PcmAudioDevice : IDisposable
         ArgumentOutOfRangeException.ThrowIfNegative(lengthFrames);
         _fill = fill;
         _lengthFrames = lengthFrames;
+        _endFrame = lengthFrames;
         _muted = muted;
         _ended = lengthFrames == 0;
         _worker = new Thread(Produce)
@@ -157,17 +161,31 @@ internal sealed class PcmAudioDevice : IDisposable
         _wake.Set();
     }
 
+    internal void SetPlaybackEnd(long? frame)
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            var position = ReadPosition(); var resume = _playing;
+            _endFrame = frame.HasValue ? Math.Clamp(frame.Value, 0, _lengthFrames) : _lengthFrames;
+            ResetAt(position);
+            if (resume && !_ended) BeginPlayback();
+        }
+        _wake.Set();
+    }
+
     private void ResetAt(long frame)
     {
         Check(WaveOutReset(_device), "重新定位音訊");
         Check(WaveOutPause(_device), "準備音訊播放位置");
         foreach (var block in _blocks) block.Queued = false;
-        _baseFrame = _nextFrame = _position = Math.Clamp(frame, 0, _lengthFrames);
+        _baseFrame = _nextFrame = _position = Math.Clamp(frame, 0, _endFrame);
         _clockWrap = 0;
         _clockType = 0;
         _lastClockValue = 0;
         _playing = false;
-        _ended = _baseFrame == _lengthFrames;
+        _buffering = false;
+        _ended = _baseFrame == _endFrame;
         _error = null;
     }
 
@@ -178,7 +196,7 @@ internal sealed class PcmAudioDevice : IDisposable
         // while the remaining blocks are still being filled.
         Check(WaveOutPause(_device), "準備音訊播放");
         FillQueue();
-        Check(WaveOutRestart(_device), "開始音訊播放");
+        if (!_buffering) Check(WaveOutRestart(_device), "開始音訊播放");
         _playing = true;
     }
 
@@ -196,9 +214,9 @@ internal sealed class PcmAudioDevice : IDisposable
                     {
                         FillQueue();
                         ReadPosition();
-                        if (_nextFrame == _lengthFrames && _blocks.All(block => !block.Queued))
+                        if (_nextFrame == _endFrame && _blocks.All(block => !block.Queued))
                         {
-                            _position = _lengthFrames;
+                            _position = _endFrame;
                             _ended = true;
                             _playing = false;
                         }
@@ -221,16 +239,15 @@ internal sealed class PcmAudioDevice : IDisposable
     private void FillQueue()
     {
         foreach (var block in _blocks)
-        {
-            if (block.Queued)
-            {
-                if ((unchecked((uint)Marshal.ReadInt32(block.Header, HeaderFlagsOffset)) & HeaderDone) == 0)
-                    continue;
+            if (block.Queued && (unchecked((uint)Marshal.ReadInt32(block.Header, HeaderFlagsOffset)) & HeaderDone) != 0)
                 block.Queued = false;
-            }
-            if (_nextFrame >= _lengthFrames) continue;
-            var frames = (int)Math.Min(BlockFrames, _lengthFrames - _nextFrame);
-            _fill(_nextFrame, block.Samples, frames);
+        foreach (var block in _blocks)
+        {
+            if (block.Queued) continue;
+            if (_nextFrame >= _endFrame) continue;
+            var frames = (int)Math.Min(BlockFrames, _endFrame - _nextFrame);
+            try { _fill(_nextFrame, block.Samples, frames); }
+            catch (AudioBufferPendingException) { break; }
             if (_muted) Array.Clear(block.Samples, 0, frames * Channels);
             Marshal.Copy(block.Samples, 0, block.Data, frames * Channels);
             // A prepared header may use a shorter final buffer. Never pad EOF
@@ -240,6 +257,10 @@ internal sealed class PcmAudioDevice : IDisposable
             block.Queued = true;
             _nextFrame += frames;
         }
+        var waiting = _nextFrame < _endFrame && !_blocks.Any(block => block.Queued);
+        if (waiting && !_buffering) Check(WaveOutPause(_device), "等待來源音訊");
+        if (!waiting && _buffering && _playing) Check(WaveOutRestart(_device), "繼續來源音訊");
+        _buffering = waiting;
     }
 
     private long ReadPosition()

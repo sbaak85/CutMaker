@@ -17,6 +17,9 @@ internal sealed class AudioPreviewCache(string directory, long maximumBytes = 2L
         Environment.GetEnvironmentVariable("CUTMAKER_DATA_DIR") ??
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CutMaker"), "audio-preview"));
 
+    private long Budget => ReferenceEquals(this, Shared) ? EditorPreferences.Current.CacheBytes / 2 : maximumBytes;
+    private long EntryBudget => ReferenceEquals(this, Shared) ? EditorPreferences.Current.CacheBytes / 2 : maximumEntryBytes;
+
     internal sealed class Lease(string path, FileStream reader, bool reused) : IDisposable
     {
         internal string Path { get; } = path;
@@ -30,7 +33,7 @@ internal sealed class AudioPreviewCache(string directory, long maximumBytes = 2L
     {
         cancellationToken.ThrowIfCancellationRequested();
         var estimatedBytes = Math.Ceiling((duration + 1) * AudioSampleClock.Rate) * BytesPerFrame;
-        if (!double.IsFinite(estimatedBytes) || estimatedBytes > maximumEntryBytes) return null;
+        if (!double.IsFinite(estimatedBytes) || estimatedBytes > EntryBudget) return null;
         await Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -43,7 +46,7 @@ internal sealed class AudioPreviewCache(string directory, long maximumBytes = 2L
                 return ready;
             }
             // Reserve enough room before decoding. Locked active files are never removed.
-            if (!Prune(maximumBytes - (long)estimatedBytes)) return null;
+            if (!Prune(Budget - (long)estimatedBytes)) return null;
             var temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
@@ -52,7 +55,7 @@ internal sealed class AudioPreviewCache(string directory, long maximumBytes = 2L
                     ["-hide_banner", "-nostdin", "-y", "-v", "error", "-threads", "2", "-i", sourcePath,
                     "-map", "0:a:0", "-vn", "-af",
                     $"aresample={AudioSampleClock.Rate},aformat=sample_fmts=dblp:channel_layouts=stereo,asetpts=N/SR/TB",
-                    "-c:a", "pcm_f64le", "-f", "f64le", "-fs", maximumEntryBytes.ToString(CultureInfo.InvariantCulture),
+                    "-c:a", "pcm_f64le", "-f", "f64le", "-fs", EntryBudget.ToString(CultureInfo.InvariantCulture),
                     "-progress", "pipe:1", "-nostats", temporary], cancellationToken, line =>
                     {
                         if (line.StartsWith("out_time_us=", StringComparison.Ordinal) &&
@@ -63,21 +66,25 @@ internal sealed class AudioPreviewCache(string directory, long maximumBytes = 2L
                 cancellationToken.ThrowIfCancellationRequested();
                 var file = new FileInfo(temporary);
                 // -fs can stop successfully at the size limit: never publish a truncated source.
-                if (!file.Exists || file.Length == 0 || file.Length >= maximumEntryBytes || file.Length % BytesPerFrame != 0)
+                if (!file.Exists || file.Length == 0 || file.Length >= EntryBudget || file.Length % BytesPerFrame != 0)
                     return null;
                 if (key != GetKey(sourcePath, ffmpeg))
                     throw new IOException("載入期間來源音訊已變更，請重新播放。");
-                if (!Prune(maximumBytes - file.Length)) return null;
+                if (!Prune(Budget - file.Length)) return null;
                 try { File.Move(temporary, target); }
                 catch (IOException) when (File.Exists(target)) { } // Another window published the same source.
-                return TryOpen(target, reused: false);
+                var published = TryOpen(target, reused: false);
+                if (ReferenceEquals(this, Shared)) ManagedMediaCache.Prune(EditorPreferences.Current.CacheBytes);
+                return published;
             }
             finally { Delete(temporary); }
         }
         finally { Gate.Release(); }
     }
 
-    private static string GetKey(string sourcePath, string ffmpeg)
+    internal Lease? TryAcquireExisting(string sourcePath, string ffmpeg) => TryOpen(Path.Combine(directory, GetKey(sourcePath, ffmpeg) + ".f64"), true);
+
+    internal static string GetKey(string sourcePath, string ffmpeg)
     {
         var source = new FileInfo(sourcePath);
         if (!source.Exists) throw new FileNotFoundException("找不到音訊來源。", sourcePath);
@@ -87,7 +94,7 @@ internal sealed class AudioPreviewCache(string directory, long maximumBytes = 2L
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity))).ToLowerInvariant();
     }
 
-    private static Lease? TryOpen(string path, bool reused)
+    internal static Lease? TryOpen(string path, bool reused)
     {
         try
         {

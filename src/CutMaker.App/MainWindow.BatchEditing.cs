@@ -20,7 +20,7 @@ public partial class MainWindow
     internal void SetClipSelection(IEnumerable<string> ids, string? primary = null)
     {
         var selected = TimelineBatchEditor.ExpandLinks(_project, ids);
-        SelectedTimelineClipIds = selected.ToArray();
+        if (SelectedTimelineClipIds is null || !selected.SetEquals(SelectedTimelineClipIds)) SelectedTimelineClipIds = selected.ToArray();
         SelectedTimelineClipId = primary is not null && selected.Contains(primary) ? primary : selected.FirstOrDefault();
     }
 
@@ -40,7 +40,7 @@ public partial class MainWindow
     private void NormalizeClipSelection()
     {
         // Single-clip legacy paths select a new primary; do not retain a previous unrelated set.
-        if (SelectedTimelineClipId is null) SelectedTimelineClipIds = [];
+        if (SelectedTimelineClipId is null) { if (SelectedTimelineClipIds?.Count > 0) SelectedTimelineClipIds = []; }
         else if (SelectedTimelineClipIds?.Contains(SelectedTimelineClipId) != true) SetClipSelection([SelectedTimelineClipId], SelectedTimelineClipId);
         else SetClipSelection(SelectionIds(), SelectedTimelineClipId);
     }

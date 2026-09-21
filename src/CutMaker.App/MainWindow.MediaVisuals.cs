@@ -12,7 +12,7 @@ public partial class MainWindow
     private int _mediaVisualRevision;
     private bool _mediaVisualStopped;
 
-    private void InitializeMediaVisuals() => RefreshMediaVisuals();
+    private void InitializeMediaVisuals() { InitializeWaveDetails(); RefreshMediaVisuals(); QueueWaveDetails(); }
 
     internal MediaVisualSet? GetMediaVisuals(string assetId) =>
         _assetVisuals.TryGetValue(assetId, out var cached) ? cached.Visuals : null;
@@ -67,7 +67,7 @@ public partial class MainWindow
             if (revision == _mediaVisualRevision)
             {
                 _assetVisualPending.Remove(asset.Id);
-                if (changed && !_mediaVisualStopped) ApplyMediaVisualsToLanes();
+                if (changed && !_mediaVisualStopped) { ApplyMediaVisualsToLanes(); QueueWaveDetails(); }
                 else if (!token.IsCancellationRequested && !_mediaVisualStopped) RefreshMediaVisuals();
             }
         }
@@ -83,7 +83,7 @@ public partial class MainWindow
             var views = lane.Clips.Select(view =>
             {
                 var visual = clips.TryGetValue(view.Id, out var clip) ? GetMediaVisuals(clip.AssetId) : null;
-                return view with { Thumbnail = visual?.Thumbnail, Waveform = visual?.Waveform };
+                return WithWaveDetail(view with { Thumbnail = visual?.Thumbnail, Waveform = visual?.Waveform, WaveformStart = 0, WaveformDuration = 0 });
             }).ToArray();
             lane.SetCurrentValue(TimelineLane.ClipsProperty, views);
         }
@@ -91,6 +91,7 @@ public partial class MainWindow
 
     private void ResetMediaVisuals()
     {
+        _waveDetailTimer.Stop(); _waveDetailCancellation?.Cancel(); _waveDetails.Clear();
         _mediaVisualRevision++;
         _mediaVisualCancellation.Cancel();
         _mediaVisualCancellation.Dispose();

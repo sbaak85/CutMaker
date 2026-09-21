@@ -10,5 +10,10 @@
     <Compile Include="..\..\src\CutMaker.App\AudioPreviewCache.cs" Link="AudioPreviewCache.cs" />
     <Compile Include="..\..\src\CutMaker.App\AudioTimelinePreview.cs" Link="AudioTimelinePreview.cs" />
     <Compile Include="..\..\src\CutMaker.App\PreviewRenderCache.cs" Link="PreviewRenderCache.cs" />
+    <Compile Include="..\..\src\CutMaker.App\MediaWorkScheduler.cs" Link="MediaWorkScheduler.cs" />
+    <Compile Include="..\..\src\CutMaker.App\EditorPreferences.cs" Link="EditorPreferences.cs" />
+    <Compile Include="..\..\src\CutMaker.App\ManagedMediaCache.cs" Link="ManagedMediaCache.cs" />
+    <Compile Include="..\..\src\CutMaker.App\ProgressiveAudioSource.cs" Link="ProgressiveAudioSource.cs" />
+    <Compile Include="..\..\src\CutMaker.App\VideoRegionPreview.cs" Link="VideoRegionPreview.cs" />
   </ItemGroup>
 </Project>

@@ -11,8 +11,8 @@ namespace CutMaker.App;
 
 public partial class MainWindow
 {
-    private ExportVideoQuality _exportVideoQuality = ExportVideoQuality.Balanced;
-    private int _exportAudioBitrate = 192;
+    private ExportVideoQuality _exportVideoQuality = EditorPreferences.Current.ExportQuality;
+    private int _exportAudioBitrate = EditorPreferences.Current.AudioBitrate;
     private bool _exportMarkedRange;
     private double _exportInSeconds;
     private double _exportOutSeconds;
@@ -63,7 +63,7 @@ public partial class MainWindow
         var bitrates = new[] { 128, 192, 256, 320 };
         var bitrate = new ComboBox { ItemsSource = bitrates.Select(value => $"{value} kbps").ToArray(), SelectedIndex = Array.IndexOf(bitrates, _exportAudioBitrate), MinHeight = 32 };
         panel.Children.Add(bitrate);
-        Label("輸出區間（秒）；畫質、位元率及區間適用於本次工作階段");
+        Label("輸出區間（秒）；畫質與位元率會記住，區間只適用於目前專案工作階段");
         var marked = new CheckBox { Content = "只匯出指定區間", Foreground = Brushes.White,
             IsChecked = _exportMarkedRange, Margin = new Thickness(0, 3, 0, 6) };
         panel.Children.Add(marked);
@@ -103,6 +103,7 @@ public partial class MainWindow
             }
             _exportVideoQuality = (ExportVideoQuality)quality.SelectedIndex;
             _exportAudioBitrate = bitrates[bitrate.SelectedIndex];
+            SavePreferencesSafely(EditorPreferences.Current with { ExportQuality = _exportVideoQuality, AudioBitrate = _exportAudioBitrate });
             _exportMarkedRange = marked.IsChecked == true;
             _exportInSeconds = inTime; _exportOutSeconds = outTime;
             dialog.DialogResult = true;

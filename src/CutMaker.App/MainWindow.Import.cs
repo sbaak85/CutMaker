@@ -176,6 +176,7 @@ public partial class MainWindow
 
     private void ResetProjectImport()
     {
+        SaveProjectView();
         RecoveryProjectChanging();
         ResetOutputRange();
         ResetMediaVisuals();

@@ -155,6 +155,13 @@ public partial class MainWindow
         RefreshSelectionInspector();
         lane.Focus();
         var menu = new ContextMenu();
+        if (clip is not null)
+        {
+            var hit = lane.HitEdit(clip.Start, clip.Duration, clip.FadeIn?.Duration ?? 0, clip.FadeOut?.Duration ?? 0, e.GetPosition(lane));
+            if (hit == PointerEdit.FadeOut) { AddFadeMenu(menu, false); AddFadeMenu(menu, true); }
+            else { AddFadeMenu(menu, true); AddFadeMenu(menu, false); }
+            menu.Items.Add(new Separator());
+        }
         void Item(string text, RoutedEventHandler handler, string gesture = "")
         {
             var item = new MenuItem { Header = text, InputGestureText = gesture };

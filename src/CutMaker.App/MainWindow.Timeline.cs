@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -19,12 +20,13 @@ public partial class MainWindow
     private bool _draggingFromLibrary;
     private long _lastDragScroll;
     private bool _updatingTimelineViewport;
+    private readonly ObservableCollection<TimelineTrackRow> _timelineRows = [];
 
     public static readonly DependencyProperty TimelinePixelsPerSecondProperty = DependencyProperty.Register(
-        nameof(TimelinePixelsPerSecond), typeof(double), typeof(MainWindow), new PropertyMetadata(40.0));
+        nameof(TimelinePixelsPerSecond), typeof(double), typeof(MainWindow), new PropertyMetadata(40.0, (owner, _) => ((MainWindow)owner).QueueWaveDetails()));
     public double TimelinePixelsPerSecond { get => (double)GetValue(TimelinePixelsPerSecondProperty); set => SetValue(TimelinePixelsPerSecondProperty, value); }
     public static readonly DependencyProperty TimelineOffsetSecondsProperty = DependencyProperty.Register(
-        nameof(TimelineOffsetSeconds), typeof(double), typeof(MainWindow), new PropertyMetadata(0.0));
+        nameof(TimelineOffsetSeconds), typeof(double), typeof(MainWindow), new PropertyMetadata(0.0, (owner, _) => ((MainWindow)owner).QueueWaveDetails()));
     public double TimelineOffsetSeconds { get => (double)GetValue(TimelineOffsetSecondsProperty); set => SetValue(TimelineOffsetSecondsProperty, value); }
     public static readonly DependencyProperty SelectedTimelineClipIdProperty = DependencyProperty.Register(
         nameof(SelectedTimelineClipId), typeof(string), typeof(MainWindow), new PropertyMetadata(null));
@@ -36,30 +38,36 @@ public partial class MainWindow
         var focusedTrack = (Keyboard.FocusedElement as TimelineLane)?.Tag as string;
         if (SelectedTimelineClipId is not null && !_project.Clips.Any(clip => clip.Id == SelectedTimelineClipId)) SelectedTimelineClipId = null;
         NormalizeClipSelection();
+        var clipIds = _project.Clips.Select(clip => clip.Id).ToHashSet();
+        foreach (var id in _waveDetails.Keys.Where(id => !clipIds.Contains(id)).ToArray()) _waveDetails.Remove(id);
         var assets = _project.MediaAssets.ToDictionary(asset => asset.Id);
-        TrackItems.ItemsSource = _project.Tracks.Select(track => new
+        if (!ReferenceEquals(TrackItems.ItemsSource, _timelineRows)) TrackItems.ItemsSource = _timelineRows;
+        var grouped = _project.Clips.ToLookup(clip => clip.TrackId);
+        var ids = _project.Tracks.Select(track => track.Id).ToHashSet();
+        for (var index = _timelineRows.Count - 1; index >= 0; index--)
+            if (!ids.Contains(_timelineRows[index].Id)) _timelineRows.RemoveAt(index);
+        for (var index = 0; index < _project.Tracks.Count; index++)
         {
-            track.Id, track.Name, IsLocked = track.Locked,
-            IsCollapsed = IsTrackCollapsed(track.Id),
-            RowHeight = IsTrackCollapsed(track.Id) ? 30d : 86d,
-            CollapseGlyph = IsTrackCollapsed(track.Id) ? "▸" : "▾",
-            CollapseToolTip = IsTrackCollapsed(track.Id) ? "展開軌道" : "收折軌道",
-            IsAudio = track.Kind == TrackKind.Audio,
-            IsMuted = track.Muted,
-            MuteToolTip = track.Muted ? "解除此軌道靜音" : "靜音此軌道",
-            DetailVisibility = IsTrackCollapsed(track.Id) ? Visibility.Collapsed : Visibility.Visible,
-            TrackDetail = $"{(track.Muted ? "靜音" : $"音量 {track.Volume * 100:0}%")}{(track.Locked ? " · 鎖定" : "")}",
-            Symbol = track.Kind == TrackKind.Video ? "V" : "A",
-            Clips = (IReadOnlyList<TimelineClipView>)_project.Clips.Where(clip => clip.TrackId == track.Id).OrderBy(clip => clip.Start)
+            var track = _project.Tracks[index];
+            var clips = grouped[track.Id].OrderBy(clip => clip.Start)
                 .Select(clip => new TimelineClipView(clip.Id, (clip.LinkGroupId is null ? "" : "↔ ") + Path.GetFileName(assets[clip.AssetId].Path), track.Kind == TrackKind.Audio ? MediaKind.Audio : assets[clip.AssetId].Kind, clip.Start, clip.Duration,
                     clip.FadeIn?.Duration ?? 0, clip.FadeOut?.Duration ?? 0, GetMediaVisuals(clip.AssetId)?.Thumbnail, GetMediaVisuals(clip.AssetId)?.Waveform,
-                    clip.SourceIn, assets[clip.AssetId].Duration, clip.FadeIn, clip.FadeOut)).ToArray()
-        }).ToArray();
+                    clip.SourceIn, assets[clip.AssetId].Duration, clip.FadeIn, clip.FadeOut)).Select(WithWaveDetail).ToArray();
+            var row = _timelineRows.FirstOrDefault(item => item.Id == track.Id);
+            if (row is null) _timelineRows.Insert(index, new(track, IsTrackCollapsed(track.Id), clips));
+            else
+            {
+                var previous = _timelineRows.IndexOf(row);
+                if (previous != index) _timelineRows.Move(previous, index);
+                row.Update(track, IsTrackCollapsed(track.Id), clips);
+            }
+        }
         TrackCount.Text = $"{_project.Tracks.Count} 條軌道 · {_project.Clips.Count} 個片段";
         RemoveClipButton.IsEnabled = SelectedTimelineClipId is not null;
         RefreshSelectionInspector();
         UpdateTimelineViewport();
         RefreshMediaVisuals();
+        QueueWaveDetails();
         if (focusedTrack is not null)
         {
             TrackItems.UpdateLayout();
@@ -76,6 +84,7 @@ public partial class MainWindow
     {
         if (TryZoomTimelineWheel(e.Delta, Keyboard.Modifiers, e.GetPosition(TimelineTimeRuler).X))
             e.Handled = true;
+        else if (TryPanTimelineWheel(e.Delta, Keyboard.Modifiers)) e.Handled = true;
     }
 
     internal bool TryZoomTimelineWheel(int delta, ModifierKeys modifiers, double pointerX)
