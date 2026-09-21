@@ -41,3 +41,22 @@
 - 安裝在 `I:\Codex\工具型\CutMaker\.tools\ffmpeg\`；啟動腳本只設定本次程序的 `CUTMAKER_FFMPEG_DIR`，不寫系統 PATH、不加系統解碼器包。
 - 原發行包 GPL v3 授權文件保留在 `.tools/ffmpeg/LICENSE`，原說明保留在 `.tools/ffmpeg/README.txt`。工具原始碼及發行來源見上方連結。
 - Git 不包含 FFmpeg 執行檔或下載包。新環境執行 `scripts/setup-ffmpeg.ps1` 下載固定版本並核對相同雜湊。
+
+## 2026-09-21：此電腦首次安裝
+
+- 專案位置：`C:\Users\sbaak.fang\ChatGPT\CutMaker`。
+- 依使用者指定，Microsoft .NET SDK 10.0.401 安裝於 `tools/dotnet/`，來源為既有 setup 腳本使用的 Microsoft 官方 dotnet-install；已執行 --list-sdks 確認版本。
+- 隨附 Microsoft.NETCore.App、Microsoft.WindowsDesktop.App、Microsoft.AspNetCore.App 10.0.12；授權文件位於 `tools/dotnet/LICENSE.txt` 與 `ThirdPartyNotices.txt`。
+- FFmpeg／ffprobe 9.0.2 安裝於 `.tools/ffmpeg/`，沿用上列固定 Gyan 發行來源與 SHA-256，下載包雜湊核對通過；授權保留於 `.tools/ffmpeg/LICENSE`。
+- 啟動環境優先使用 `tools/dotnet`，保留舊 `.tools/dotnet` 相容性；新 SDK 安裝腳本改用 `tools/dotnet`。兩個工具目錄均由 Git 忽略。
+- 修正 SDK 安裝成功但 LASTEXITCODE 為空時誤報失敗的判斷，改檢查指定版本 SDK 檔案是否存在。
+- 未修改系統 PATH、未安裝系統解碼器包。
+
+## 2026-09-21：跨專案共用工具
+
+- SDK 10.0.401 搬至 `C:\Users\sbaak.fang\ChatGPT\.tools\dotnet10`，FFmpeg 9.0.2 搬至同層 `ffmpeg`；未重新下載，保留既有 dotnet6，授權文件隨工具搬移。
+- environment.ps1、setup.ps1、setup-ffmpeg.ps1 使用專案父目錄的 `.tools`；SDK 使用 dotnet10，啟動保留舊專案 .tools/dotnet 相容性。
+- 下載包與解壓暫存搬至共用 cutmaker-downloads、cutmaker-ffmpeg-9.0.2-unpacked；安裝腳本搬至 dotnet10-install.ps1。
+- 專案 .tools/dotnet-home 為 CLI 資料；.tools/ 與 tools/ 均由 Git 忽略。tools/dotnet 僅餘被程序占用的空目錄，已確認無檔案，暫保留。未修改系統 PATH。
+- 共用 SDK Release 建置通過，0 警告、0 錯誤；未執行完整影音驗證。
+- 直接呼叫 build-server shutdown 時 SDK 首次初始化顯示 HTTPS 開發憑證安裝訊息，未執行 trust；正常專案腳本仍停用自動憑證與遙測。

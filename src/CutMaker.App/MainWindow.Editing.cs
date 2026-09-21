@@ -218,7 +218,7 @@ public partial class MainWindow
         RemoveClipButton.IsEnabled = false; RefreshSelectionInspector();
     }
 
-    private void BeginPointerEdit(TimelineLane lane, Clip clip, Point point)
+    private void BeginPointerEdit(TimelineLane lane, Clip clip, Point point, bool captureMouse = true)
     {
         if (lane.IsLocked) return;
         _pointerMode = lane.HitEdit(clip.Start, clip.Duration, clip.FadeIn?.Duration ?? 0, clip.FadeOut?.Duration ?? 0, point);
@@ -229,7 +229,7 @@ public partial class MainWindow
         if (_pointerMode == PointerEdit.FadeIn) _pointerGrabOffset -= clip.FadeIn?.Duration ?? 0;
         else if (_pointerMode == PointerEdit.FadeOut) _pointerGrabOffset -= clip.Duration - (clip.FadeOut?.Duration ?? 0);
         _pointerMoved = false;
-        lane.CaptureMouse();
+        if (captureMouse) lane.CaptureMouse();
         lane.Cursor = _pointerMode == PointerEdit.Move ? Cursors.SizeAll : Cursors.SizeWE;
     }
 
@@ -355,10 +355,12 @@ public partial class MainWindow
     {
         if (IsMarqueeSelecting)
         { UpdateMarqueeFromPointer(e, autoScroll: false); EndMarqueeSelection(cancel: false); e.Handled = true; return; }
+        var clicked = _pointerOriginal;
         var candidate = _pointerCandidate;
         var moved = _pointerMoved;
         var moveSelection = _pointerMode == PointerEdit.Move;
         CancelPointerEdit();
+        if (!moved && clicked is not null) { SetClipSelection([clicked.Id], clicked.Id); RefreshSelectionInspector(); StatusText.Text = $"已選取 {SelectionIds().Count} 個片段 · Ctrl+點選追加／取消 · Esc 清除選取"; }
         if (moved && candidate is not null) CommitBatch(() => PlanLinkedReplacement(candidate, moveSelection), "已更新選取片段 · Ctrl+Z 復原");
         e.Handled = true;
     }

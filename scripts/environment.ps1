@@ -7,8 +7,12 @@ $env:DOTNET_NOLOGO = '1'
 $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
 $env:NUGET_PACKAGES = Join-Path $script:CutMakerRoot '.cache\nuget'
 $env:CUTMAKER_DATA_DIR = Join-Path $script:CutMakerRoot 'runtime'
-$env:CUTMAKER_FFMPEG_DIR = Join-Path $script:CutMakerRoot '.tools\ffmpeg\bin'
-$localDotnet = Join-Path $script:CutMakerRoot '.tools\dotnet\dotnet.exe'
+$sharedToolRoot = Join-Path (Split-Path -Parent $script:CutMakerRoot) '.tools'
+$env:CUTMAKER_FFMPEG_DIR = Join-Path $sharedToolRoot 'ffmpeg\bin'
+$localDotnet = Join-Path $sharedToolRoot 'dotnet10\dotnet.exe'
+if (-not (Test-Path -LiteralPath $localDotnet)) {
+    $localDotnet = Join-Path $script:CutMakerRoot '.tools\dotnet\dotnet.exe'
+}
 if (Test-Path -LiteralPath $localDotnet) {
     $script:CutMakerDotnet = $localDotnet
     $env:DOTNET_ROOT = Split-Path -Parent $localDotnet

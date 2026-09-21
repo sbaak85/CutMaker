@@ -28,7 +28,7 @@ internal static class MediaVisualCache
     {
         var path = ResolvePath(asset, projectPath);
         var file = new FileInfo(path);
-        var signature = string.Join("|", "visual-v1", path.ToUpperInvariant(), file.Exists ? file.LastWriteTimeUtc.Ticks : 0,
+        var signature = string.Join("|", "visual-gold-v2", path.ToUpperInvariant(), file.Exists ? file.LastWriteTimeUtc.Ticks : 0,
             file.Exists ? file.Length : 0, asset.Kind, asset.Duration.ToString("R", CultureInfo.InvariantCulture));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(signature))).ToLowerInvariant();
     }
@@ -104,7 +104,7 @@ internal static class MediaVisualCache
 
     internal static async Task<BitmapSource> GetWaveDetailAsync(MediaAsset asset, string? projectPath, double start, double duration, CancellationToken token)
     {
-        var key = ManagedMediaCache.Hash($"wave-detail-v1|{GetKey(asset, projectPath)}|{start:R}|{duration:R}");
+        var key = ManagedMediaCache.Hash($"wave-detail-gold-v2|{GetKey(asset, projectPath)}|{start:R}|{duration:R}");
         if (Memory.TryGetValue(key, out var known) && known.Waveform is not null) return known.Waveform;
         using var scheduled = await MediaWorkScheduler.BackgroundAsync(token).ConfigureAwait(false);
         Directory.CreateDirectory(CacheDirectory);
@@ -199,7 +199,7 @@ internal static class MediaVisualCache
             for (var y = WaveHeight / 2 - half; y <= WaveHeight / 2 + half; y++)
             {
                 var index = y * stride + x * 4;
-                pixels[index] = 211; pixels[index + 1] = 226; pixels[index + 2] = 138; pixels[index + 3] = 255;
+                pixels[index] = 123; pixels[index + 1] = 190; pixels[index + 2] = 222; pixels[index + 3] = 255;
             }
         }
         var bitmap = BitmapSource.Create(peaks.Length, WaveHeight, 96, 96, PixelFormats.Bgra32, null, pixels, stride);

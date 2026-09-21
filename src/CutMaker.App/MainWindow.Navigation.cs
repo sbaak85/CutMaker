@@ -12,6 +12,15 @@ public partial class MainWindow
     /// <summary>Called only for timeline/preview focus, leaving text, sliders and native selection keys alone.</summary>
     internal bool TryHandleNavigationShortcut(Key key, ModifierKeys modifiers)
     {
+        if (modifiers == ModifierKeys.None && key is Key.A or Key.D)
+        { StepPreviewFrame(key == Key.A ? -1 : 1); return true; }
+        if (modifiers == ModifierKeys.None && key is Key.W or Key.S)
+        {
+            var clip = SelectedClip();
+            if (clip is null) StatusText.Text = "請先選取片段";
+            else NavigatePlayhead(key == Key.W ? clip.Start : clip.End, key == Key.W ? "選取素材開頭" : "選取素材結尾");
+            return true;
+        }
         if (key is Key.Left or Key.Right)
         {
             var direction = key == Key.Left ? -1 : 1;

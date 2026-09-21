@@ -210,6 +210,7 @@ public partial class MainWindow : Window
         if (navigationFocus && TryHandleNavigationShortcut(key, modifiers)) { e.Handled = true; return; }
         if (timelineFocus)
         {
+            if (TryHandleClipShortcut(key, modifiers, e.IsRepeat)) { e.Handled = true; return; }
             if (modifiers == ModifierKeys.Control)
             {
                 switch (key)
@@ -221,7 +222,7 @@ public partial class MainWindow : Window
                     case Key.D: DuplicateClips_Click(this, e); e.Handled = true; return;
                 }
             }
-            if (key == Key.S && modifiers == ModifierKeys.None)
+            if (key == Key.C && modifiers == ModifierKeys.None && !e.IsRepeat)
             { SetTimelineSnapping(!TimelineSnapEnabled); e.Handled = true; return; }
             if (key == Key.Delete && modifiers == ModifierKeys.Shift)
             { DeleteSelectedClips(true); e.Handled = true; return; }
@@ -243,7 +244,7 @@ public partial class MainWindow : Window
             case Key.O: Open_Click(this, e); break;
             case Key.S: SaveProject(false); break;
             case Key.I: ImportFiles_Click(this, e); break;
-            case Key.B when Keyboard.FocusedElement is not TextBoxBase: SplitClip_Click(this, e); break;
+
             case Key.Z when Keyboard.FocusedElement is not TextBoxBase: Undo_Click(this, e); break;
             case Key.Y when Keyboard.FocusedElement is not TextBoxBase: Redo_Click(this, e); break;
             default: return;
@@ -276,6 +277,7 @@ public partial class MainWindow : Window
             var availableHeight = Math.Max(0, client.ActualHeight - RootLayout.Margin.Top - RootLayout.Margin.Bottom);
             var compactHeight = availableHeight < 540;
             var headerHeight = compactHeight ? 34 : 58;
+            TimelinePanel.Padding = compactHeight ? new Thickness(14, 6, 14, 6) : new Thickness(14);
             RootLayout.RowDefinitions[0].Height = new GridLength(headerHeight);
             foreach (var button in ProjectToolbar.Children.OfType<Button>())
                 button.Padding = compactHeight ? new Thickness(8, 5, 8, 5) : new Thickness(14, 8, 14, 8);

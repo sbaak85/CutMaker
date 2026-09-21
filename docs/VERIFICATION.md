@@ -1,3 +1,25 @@
+## C／WASD 快捷鍵與吸附提示
+
+- C 切換吸附（按住不連續切換）；W／S 定位主選素材頭尾；A／D 逐幀，保留方向鍵及 Ctrl 組合鍵。文字欄位沿用輸入焦點隔離。
+- 提示位於播放頭右側，靠右邊界時限制在可視區；完整停留 1 秒，DoubleAnimation 於接著 0.2 秒由 1 淡至 0。連續切換以新提示取代並重新計時。
+- Release 0 警告／0 錯誤，核心 25/25、原生音訊檢查通過。新增 W/S、A/D、提示停留／重啟／消失檢查通過，已目視 workspace-snap-toggle-hint.png。
+- 首輪既有尺規後 Space 播放檢查失敗；未改動該播放處理，獨立資料目錄的最終 WPF 全整合重跑通過（包含該檢查）。保留此環境波動記錄，不宣稱真人操作驗收。
+- 最終 WPF 證據：runtime/hotkey-verification/smoke/，為 Git 忽略的本機生成物。
+## 選取醒目度與跨軌殘留修正
+
+- Ctrl 框選改為取代舊選取；Ctrl+Shift 框選追加。單擊放開已選素材回到單選（既有連動夥伴仍保留），拖曳仍支援群組移動，Esc 清除選取。
+- 多選素材採亮金底與 1.5 DIP 金框，主選採更亮金底與 2 DIP 淡金框；未選素材保持深色。
+- 新增單軌框選清除其他軌舊選取、明確追加、單擊退出多選三項回歸，最終 WPF 整合通過；已目視 workspace-selection-primary.png。仍非真人滑鼠手感驗收。
+- 新增回歸證據位於 runtime/selection-verification/smoke，Git 忽略。
+# 時間軸視覺與操作更新（2026-09-21，此電腦）
+
+- 位置：C:\Users\sbaak.fang\ChatGPT\CutMaker；使用父目錄共用 SDK 10.0.401 與 FFmpeg 9.0.2。
+- scripts/verify.ps1 最終完整通過：Release 0 警告／0 錯誤、核心 25/25、渲染／混音 137/137、獨立程序原生 PCM 與 WPF 整合。
+- 新增操作檢查通過：左右括號修剪頭尾而不切割、一次 Undo、播放頭在外拒絕、B 切割與 Ctrl+B 停用、42 DIP 尺規、空白拖曳定位保留選取與歷史、Ctrl 空白手勢啟動框選。操作總計 26 項通過。
+- 已目視預設／收折、小螢幕、最小視窗、窄版長名稱及局部金色波形渲染圖。小視窗以減少時間軸面板留白容納尺規高度，保留素材庫與軌道操作空間。
+- 深金片段直角細框，頭尾各 30% 漸層、左上與右下邊框高光；概覽與局部波形快取版本更新以避免沿用舊色。
+- 離屏測試遇到系統滑鼠擷取立即遺失，改用可選 captureMouse=false 測試共用手勢入口；正式滑鼠操作仍預設擷取。Fade 像素、候選、提交、Undo、Esc 與失去擷取處理檢查保留並通過。此結果不代表真人滑鼠／鍵盤手感驗收。
+- 本次證據：runtime/verification/smoke/interaction-result.txt、fade-drag-result.txt、result.txt、workspace-*.png 與 runtime/render-checks/；生成物不納入 Git。
 # 0.8.0 性能與 P1 操作驗證
 
 日期：2026-09-21。位置：`I:\Codex\工具型\CutMaker`。

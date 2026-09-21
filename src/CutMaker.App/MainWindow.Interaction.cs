@@ -79,7 +79,7 @@ public partial class MainWindow
         dialog.Content = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = new TextBlock
         {
             Margin = new Thickness(22), TextWrapping = TextWrapping.Wrap, FontSize = 14,
-            Text = "播放／暫停：空白鍵\n切割：Ctrl+B\n試聽接點：Ctrl+Shift+Space\n\n復原／重做：Ctrl+Z／Ctrl+Y\n剪下／複製／貼上：Ctrl+X／C／V\n全選：Ctrl+A\n複製到尾端：Ctrl+D\n刪除：Delete；同軌波紋刪除：Shift+Delete\n\n縮放：Ctrl+滾輪；顯示全部：Ctrl+0\n水平捲動：Shift+滾輪\n平移時間軸：按住中鍵拖曳\n精細拖曳：拖動時按住 Shift\n吸附開關：S；暫停吸附：按住 Alt\n\n前後一格：←／→；前後一秒：Shift+←／→\n前後片段邊界：Alt+←／→\n起點／終點：Home／End；精確定位：Ctrl+G\n\nFade：拖曳金色方塊，右鍵設定秒數／曲線／預設\n取消拖曳或框選：Esc\n\n儲存／另存：Ctrl+S／Ctrl+Shift+S\n新增／開啟／匯入：Ctrl+N／Ctrl+O／Ctrl+I\n操作說明：F1\n\n剪輯快捷鍵以時間軸焦點為主；文字欄位保留原本輸入操作。"
+            Text = "播放／暫停：空白鍵\n切割：B\n修剪開頭／結尾至播放頭：[／]\n空白處拖曳定位；Ctrl+左鍵拖曳框選\n試聽接點：Ctrl+Shift+Space\n\n復原／重做：Ctrl+Z／Ctrl+Y\n剪下／複製／貼上：Ctrl+X／C／V\n全選：Ctrl+A\n複製到尾端：Ctrl+D\n刪除：Delete；同軌波紋刪除：Shift+Delete\n\n縮放：Ctrl+滾輪；顯示全部：Ctrl+0\n水平捲動：Shift+滾輪\n平移時間軸：按住中鍵拖曳\n精細拖曳：拖動時按住 Shift\n吸附開關：C；暫停吸附：按住 Alt\n\n選取素材開頭／結尾：W／S\n前後一格：A／D 或 ←／→；前後一秒：Shift+←／→\n前後片段邊界：Alt+←／→\n起點／終點：Home／End；精確定位：Ctrl+G\n\nFade：拖曳金色方塊，右鍵設定秒數／曲線／預設\n取消拖曳或框選：Esc\n\n儲存／另存：Ctrl+S／Ctrl+Shift+S\n新增／開啟／匯入：Ctrl+N／Ctrl+O／Ctrl+I\n操作說明：F1\n\n剪輯快捷鍵以時間軸焦點為主；文字欄位保留原本輸入操作。"
         } };
         dialog.ShowDialog();
     }

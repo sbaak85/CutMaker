@@ -1,5 +1,6 @@
 # Local toolchain, packages, builds, editor state
 .tools/
+tools/
 .cache/
 .vs/
 .idea/

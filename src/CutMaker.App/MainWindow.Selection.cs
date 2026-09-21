@@ -58,7 +58,7 @@ public partial class MainWindow
         SetClipSelection(_marqueeAdditive ? _marqueeOriginalIds.Concat(hit) : hit);
         RemoveClipButton.IsEnabled = SelectedTimelineClipId is not null;
         RefreshSelectionInspector();
-        StatusText.Text = $"框選 {SelectionIds().Count} 個片段 · Ctrl+框選加入選取 · Esc 取消";
+        StatusText.Text = $"框選 {SelectionIds().Count} 個片段 · Ctrl+Shift+框選追加 · Esc 取消";
 
         var origin = TrackItems.TranslatePoint(new Point(laneLeft, 0), TimelineContent);
         var left = Math.Clamp(origin.X + (low - TimelineOffsetSeconds) * TimelinePixelsPerSecond, origin.X, origin.X + TimelineViewportWidth);
@@ -129,7 +129,8 @@ public partial class MainWindow
     private void SetTimelineSnapping(bool enabled)
     {
         TimelineSnapEnabled = enabled; SnapMenuItem.IsChecked = enabled;
-        StatusText.Text = enabled ? "吸附已開啟 · 拖曳時按 Alt 可暫時停用" : "吸附已關閉 · S 重新開啟";
+        ShowSnapHint(enabled);
+        StatusText.Text = enabled ? "吸附已開啟 · 拖曳時按 Alt 可暫時停用" : "吸附已關閉 · C 重新開啟";
     }
 
     private void CutClips_Click(object sender, RoutedEventArgs e)
@@ -170,7 +171,7 @@ public partial class MainWindow
         Item("剪下", CutClips_Click, "Ctrl+X"); Item("複製", CopyClips_Click, "Ctrl+C");
         Item("貼到播放頭", PasteClips_Click, "Ctrl+V"); Item("複製到尾端", DuplicateClips_Click, "Ctrl+D");
         menu.Items.Add(new Separator());
-        Item("切割", SplitClip_Click, "Ctrl+B"); Item("刪除", RemoveClip_Click, "Delete");
+        Item("切割", SplitClip_Click, "B"); Item("刪除", RemoveClip_Click, "Delete");
         Item("同軌波紋刪除", RippleDelete_Click, "Shift+Delete");
         menu.Items.Add(new Separator());
         Item("定位到選取起點", SelectedStart_Click); Item("定位到選取終點", SelectedEnd_Click);

@@ -237,15 +237,15 @@
             </Border>
         </Grid>
         <GridSplitter Grid.Row="3" Height="6" HorizontalAlignment="Stretch" VerticalAlignment="Center" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" AutomationProperties.Name="調整時間軸高度" DragCompleted="Splitter_DragCompleted" />
-        <Border Grid.Row="4" Background="{StaticResource PanelBrush}" CornerRadius="6" Padding="14">
+        <Border x:Name="TimelinePanel" Grid.Row="4" Background="{StaticResource PanelBrush}" CornerRadius="6" Padding="14">
             <Grid>
-                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="34" /><RowDefinition /><RowDefinition Height="20" /></Grid.RowDefinitions>
+                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="50" /><RowDefinition /><RowDefinition Height="20" /></Grid.RowDefinitions>
                 <WrapPanel>
                     <TextBlock Text="時間軸" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,22,0" />
                     <Button Content="＋ 影片軌" Click="AddVideo_Click" Padding="12,6" />
                     <Button Content="＋ 音訊軌" Click="AddAudio_Click" Padding="12,6" />
                     <Button x:Name="RemoveClipButton" Content="移除片段" Click="RemoveClip_Click" Padding="12,6" IsEnabled="False" ToolTip="選取片段後按 Delete；來源檔案會保留" />
-                    <Button x:Name="SplitClipButton" Content="切割" Click="SplitClip_Click" Padding="12,6" ToolTip="將選取片段在播放頭位置切開 · Ctrl+B" />
+                    <Button x:Name="SplitClipButton" Content="切割" Click="SplitClip_Click" Padding="12,6" ToolTip="將選取片段在播放頭位置切開 · B" />
                     <Button Content="試聽接點" Click="Audition_Click" Padding="12,6" ToolTip="播放播放頭前後各 2 秒 · Ctrl+Shift+Space" />
                     <Menu Background="Transparent" Foreground="#EAF0FA" Margin="0,0,8,8" VerticalAlignment="Center">
                         <MenuItem Header="編輯 ▾" Padding="8,7" Background="#253247" Foreground="#EAF0FA">
@@ -263,7 +263,7 @@
                             <MenuItem Header="分離音訊並連動" Click="ExtractAudio_Click" />
                             <MenuItem Header="解除連動" Click="UnlinkClips_Click" />
                             <Separator />
-                            <MenuItem x:Name="SnapMenuItem" Header="吸附片段邊界" IsCheckable="True" IsChecked="True" InputGestureText="S" Click="SnapTimeline_Click" ToolTip="拖曳時按住 Alt 可暫時停用吸附" />
+                            <MenuItem x:Name="SnapMenuItem" Header="吸附片段邊界" IsCheckable="True" IsChecked="True" InputGestureText="C" Click="SnapTimeline_Click" ToolTip="拖曳時按住 Alt 可暫時停用吸附" />
                             <MenuItem Header="顯示整條時間軸" InputGestureText="Ctrl+0" Click="FitTimeline_Click" />
                             <MenuItem Header="定位">
                                 <MenuItem Header="前一格" InputGestureText="←" Click="FrameBack_Click" />
@@ -288,7 +288,7 @@
                     <local:TimelineRuler x:Name="TimelineTimeRuler" Grid.Column="2" PreviewMouseWheel="Timeline_MouseWheel" PixelsPerSecond="{Binding TimelinePixelsPerSecond, RelativeSource={RelativeSource AncestorType=Window}}" OffsetSeconds="{Binding TimelineOffsetSeconds, RelativeSource={RelativeSource AncestorType=Window}}"
                                          PlayheadSeconds="{Binding PlayheadSeconds, RelativeSource={RelativeSource AncestorType=Window}}" MouseLeftButtonDown="TimelineRuler_MouseDown" MouseMove="TimelineRuler_MouseMove" MouseLeftButtonUp="TimelineRuler_MouseUp" />
                 </Grid>
-                <Grid x:Name="TimelineContent" Grid.Row="2" SizeChanged="TimelineContent_SizeChanged" PreviewMouseWheel="Timeline_MouseWheel">
+                <Grid x:Name="TimelineContent" Grid.Row="2" Background="Transparent" PreviewMouseLeftButtonDown="TimelineBlank_MouseDown" SizeChanged="TimelineContent_SizeChanged" PreviewMouseWheel="Timeline_MouseWheel">
                     <Grid.ColumnDefinitions><ColumnDefinition x:Name="TrackHeaderColumn" Width="250" MinWidth="180" /><ColumnDefinition Width="8" /><ColumnDefinition Width="*" MinWidth="280" /></Grid.ColumnDefinitions>
                 <ScrollViewer x:Name="TimelineTrackScroll" Grid.ColumnSpan="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="TimelineTrackScroll_Changed">
                     <ItemsControl x:Name="TrackItems">
@@ -324,6 +324,9 @@
                 </ScrollViewer>
                     <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Center" VerticalAlignment="Stretch" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" DragDelta="TrackHeader_DragDelta" DragCompleted="Splitter_DragCompleted" AutomationProperties.Name="調整軌道名稱寬度" />
                     <Canvas Grid.ColumnSpan="3" IsHitTestVisible="False" ClipToBounds="True">
+                        <Border x:Name="SnapToggleHint" Visibility="Collapsed" Background="#EE171C18" BorderBrush="#74D28B" BorderThickness="1" Padding="14,5" MinWidth="130">
+                            <TextBlock x:Name="SnapToggleHintText" Foreground="#FFF4CF" TextAlignment="Center" />
+                        </Border>
                         <Rectangle x:Name="TimelineMarqueeRect" Visibility="Collapsed" Fill="#2878DCCB" Stroke="#78DCCB" StrokeThickness="1" />
                         <Line x:Name="TimelineSnapLine" Visibility="Collapsed" Stroke="#78DCCB" StrokeThickness="1.5" StrokeDashArray="4,3" />
                         <Border x:Name="TimelineSnapLabel" Visibility="Collapsed" Background="#E513202B" Padding="5,2" CornerRadius="3">
@@ -336,7 +339,7 @@
                 </Grid>
                 <Grid Grid.Row="3">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="{Binding TrackHeaderWidth, RelativeSource={RelativeSource AncestorType=Window}}" /><ColumnDefinition Width="8" /><ColumnDefinition /></Grid.ColumnDefinitions>
-                    <TextBlock Text="空白處拖曳框選 · Ctrl 加選 · ← → 逐格" ToolTip="空白處拖曳框選；Ctrl+框選加入。拖曳中央可整組跨軌，Esc 取消。← → 逐格，Shift+← → 一秒；Home/End 起訖；Ctrl+0 顯示全部；S 切換吸附。" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="空白拖曳定位 · Ctrl+拖曳框選" ToolTip="空白處拖曳定位播放頭；Ctrl+左鍵拖曳重新框選；Ctrl+Shift 追加。拖曳中央可整組跨軌，Esc 取消。← → 逐格，Shift+← → 一秒；Home/End 起訖；Ctrl+0 顯示全部；C 切換吸附。" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                     <ScrollBar x:Name="TimelineHorizontalScroll" Grid.Column="2" Orientation="Horizontal" Minimum="0" Maximum="60" SmallChange="1" LargeChange="10"
                                Value="{Binding TimelineOffsetSeconds, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}" />
                 </Grid>

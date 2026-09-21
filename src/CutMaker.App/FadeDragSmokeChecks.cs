@@ -116,8 +116,8 @@ public partial class MainWindow
                     double HandleX(double duration) => ((fadeIn ? clip.Start + duration : clip.End - duration) - TimelineOffsetSeconds) * TimelinePixelsPerSecond;
                     var initialX = HandleX(originalDuration);
                     Require(initialX > 20 && initialX < lane.ActualWidth - 20, "Fixture starts away from autoscroll edges.");
-                    BeginPointerEdit(lane, clip, new(initialX, compact ? 5 : 10));
-                    Require(_pointerMode == expectedMode && _pointerOriginal == clip, "Gold handle starts the correct Fade edit.");
+                    BeginPointerEdit(lane, clip, new(initialX, compact ? 5 : 10), captureMouse: false);
+                    Require(_pointerMode == expectedMode && _pointerOriginal == clip, $"Gold handle starts the correct Fade edit. mode={_pointerMode}; expected={expectedMode}; original={_pointerOriginal?.Id}; locked={lane.IsLocked}; capture={lane.IsMouseCaptured}; hit={lane.HitEdit(clip.Start, clip.Duration, clip.FadeIn?.Duration ?? 0, clip.FadeOut?.Duration ?? 0, new(initialX, compact ? 5 : 10))}");
                     var captured = lane.IsMouseCaptured;
                     foreach (var duration in new[] { 2.4, 3.2 })
                     {
@@ -188,7 +188,7 @@ public partial class MainWindow
             var lostBefore = Pixels(RenderLane(lostLane)); var lostContents = JsonSerializer.Serialize(_project);
             var lostUndo = _undo.Count; var lostRevision = _previewRevision;
             var lostX = (lostClip.Start + lostClip.FadeIn!.Duration - TimelineOffsetSeconds) * TimelinePixelsPerSecond;
-            BeginPointerEdit(lostLane, lostClip, new(lostX, 5));
+            BeginPointerEdit(lostLane, lostClip, new(lostX, 5), captureMouse: false);
             UpdatePointerEditAt(lostLane, new(lostX + 48, 5));
             TimelineLane_LostCapture(lostLane, new MouseEventArgs(Mouse.PrimaryDevice, Environment.TickCount));
             Require(_pointerOriginal is null && !lostLane.IsMouseCaptured && lostContents == JsonSerializer.Serialize(_project) &&

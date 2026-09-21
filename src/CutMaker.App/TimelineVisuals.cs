@@ -50,12 +50,25 @@ public sealed class TimelineLane : FrameworkElement
     private static readonly Pen VideoPen = TimelineDrawing.Pen("#5B8DC3");
     private static readonly Pen AudioPen = TimelineDrawing.Pen("#53BDB7");
     private static readonly Pen ImagePen = TimelineDrawing.Pen("#A88CC5");
-    private static readonly Pen SelectionPen = TimelineDrawing.Pen("#E9F5FF", 2);
+    private static readonly Pen SelectionPen = TimelineDrawing.Pen("#F0D89D", 1);
     private static readonly Brush AllowedFill = TimelineDrawing.Brush("#594CBCA5");
     private static readonly Brush DeniedFill = TimelineDrawing.Brush("#59DC6974");
     private static readonly Pen AllowedPen = TimelineDrawing.Pen("#80E1C8", 2);
     private static readonly Pen DeniedPen = TimelineDrawing.Pen("#FF919A", 2);
 
+    private static readonly Brush ClipFill = TimelineDrawing.GoldGradient(false, false);
+    private static readonly Pen ClipBorder = new(TimelineDrawing.GoldGradient(true, false), 1);
+    private static readonly Pen SelectedClipBorder = TimelineDrawing.Pen("#FFE49A", 1.5);
+    private static readonly Pen PrimaryClipBorder = TimelineDrawing.Pen("#FFF4CF", 2);
+    private static readonly Brush SelectedClipFill = SelectionFill("#95804A", "#655432");
+    private static readonly Brush PrimaryClipFill = SelectionFill("#B49B59", "#806937");
+    private static Brush SelectionFill(string edge, string center)
+    {
+        var brush = new LinearGradientBrush { StartPoint = new(0, 0), EndPoint = new(1, 0) };
+        foreach (var stop in new[] { (edge, 0d), (center, .3), (center, .7), (edge, 1d) })
+            brush.GradientStops.Add(new((Color)ColorConverter.ConvertFromString(stop.Item1), stop.Item2));
+        brush.Freeze(); return brush;
+    }
     private double? _dropStart;
     private double _dropDuration;
     private bool _dropAllowed;
@@ -203,7 +216,7 @@ public sealed class TimelineLane : FrameworkElement
         {
             var allowed = _dropAllowed && !IsLocked;
             var outline = allowed ? AllowedPen : DeniedPen;
-            drawing.DrawRoundedRectangle(allowed ? AllowedFill : DeniedFill, outline, preview, 4, 4);
+            drawing.DrawRectangle(allowed ? AllowedFill : DeniedFill, outline, preview);
             var startX = (start - OffsetSeconds) * PixelsPerSecond;
             if (startX >= 0 && startX <= ActualWidth)
                 drawing.DrawLine(outline, new Point(startX, 0), new Point(startX, ActualHeight));
@@ -216,7 +229,7 @@ public sealed class TimelineLane : FrameworkElement
         foreach (var ghost in MovePreviews)
             if (TryGetVisibleRect(ghost.Start, ghost.Duration, out var boundsPreview))
             {
-                drawing.DrawRoundedRectangle(AllowedFill, AllowedPen, boundsPreview, 4, 4);
+                drawing.DrawRectangle(AllowedFill, AllowedPen, boundsPreview);
                 TimelineDrawing.DrawText(this, drawing, $"移動 {TimelineDrawing.FormatTime(ghost.Start, true)}", 11,
                     TimelineDrawing.Foreground, new Point(boundsPreview.Left + 6, boundsPreview.Top + (IsCompact ? 5 : 7)), boundsPreview.Width - 12);
             }
@@ -245,9 +258,11 @@ public sealed class TimelineLane : FrameworkElement
     private void DrawClip(DrawingContext drawing, TimelineClipView clip)
     {
         if (!TryGetVisibleRect(clip.Start, clip.Duration, out var rect)) return;
-        var fill = clip.Kind switch { MediaKind.Audio => AudioBrush, MediaKind.Image => ImageBrush, _ => VideoBrush };
-        var outline = clip.Kind switch { MediaKind.Audio => AudioPen, MediaKind.Image => ImagePen, _ => VideoPen };
-        drawing.DrawRoundedRectangle(fill, clip.Id == SelectedClipId || SelectedClipIds?.Contains(clip.Id) == true ? SelectionPen : outline, rect, 4, 4);
+        var selected = clip.Id == SelectedClipId || SelectedClipIds?.Contains(clip.Id) == true;
+        var fullRect = new Rect((clip.Start - OffsetSeconds) * PixelsPerSecond, rect.Top,
+            clip.Duration * PixelsPerSecond, rect.Height);
+        drawing.DrawRectangle(clip.Id == SelectedClipId ? PrimaryClipFill : selected ? SelectedClipFill : ClipFill,
+            clip.Id == SelectedClipId ? PrimaryClipBorder : selected ? SelectedClipBorder : ClipBorder, fullRect);
         // Thin edge grips make the two trim targets discoverable. Fade ranges remain visible when selected.
         var actualLeft = (clip.Start - OffsetSeconds) * PixelsPerSecond;
         var actualRight = (clip.Start + clip.Duration - OffsetSeconds) * PixelsPerSecond;
@@ -448,6 +463,17 @@ internal static class TimelineDrawing
     public static bool IsPositiveFinite(object value) => value is double number && double.IsFinite(number) && number > 0;
     public static bool IsNonnegativeFinite(object value) => value is double number && double.IsFinite(number) && number >= 0;
 
+    public static Brush GoldGradient(bool border, bool selected)
+    {
+        var brush = new LinearGradientBrush { StartPoint = new(0, 0), EndPoint = border ? new(1, 1) : new(1, 0) };
+        var edge = border ? (selected ? "#FFE7AC" : "#BDAB76") : "#514C35";
+        var center = border ? (selected ? "#A58B50" : "#665D3D") : "#292A22";
+        brush.GradientStops.Add(new((Color)ColorConverter.ConvertFromString(edge), 0));
+        brush.GradientStops.Add(new((Color)ColorConverter.ConvertFromString(center), .30));
+        brush.GradientStops.Add(new((Color)ColorConverter.ConvertFromString(center), .70));
+        brush.GradientStops.Add(new((Color)ColorConverter.ConvertFromString(edge), 1));
+        brush.Freeze(); return brush;
+    }
     public static Brush Brush(string color)
     {
         var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));

@@ -1,13 +1,13 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $cutmakerRoot = Split-Path -Parent $PSScriptRoot
-$toolRoot = Join-Path $cutmakerRoot '.tools'
+$toolRoot = Join-Path (Split-Path -Parent $cutmakerRoot) '.tools'
 $destination = Join-Path $toolRoot 'ffmpeg'
 $version = '9.0.2'
 $expectedHash = '60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba'
 if (Test-Path -LiteralPath (Join-Path $destination 'bin\ffmpeg.exe')) {
     & (Join-Path $destination 'bin\ffmpeg.exe') -version | Select-Object -First 1
-    Write-Output "Using project-local FFmpeg: $destination"
+    Write-Output "Using shared FFmpeg: $destination"
     exit 0
 }
 $downloads = Join-Path $toolRoot 'downloads'

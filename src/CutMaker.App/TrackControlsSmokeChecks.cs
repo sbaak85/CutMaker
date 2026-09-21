@@ -93,7 +93,7 @@ public partial class MainWindow
             void Hit(Point point, PointerEdit expected)
             {
                 Require(ReferenceEquals(lane.InputHitTest(point), lane), "Compact lane still accepts pointer input.");
-                BeginPointerEdit(lane, originalClip, point);
+                BeginPointerEdit(lane, originalClip, point, captureMouse: false);
                 try { Require(_pointerMode == expected, $"Compact hit target selects {expected}, got {_pointerMode}."); }
                 finally { CancelPointerEdit(); }
             }
