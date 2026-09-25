@@ -22,9 +22,9 @@ public static class AudioSampleClock
     {
         var first = Math.Max(At(clip.Start), At(rangeStart));
         var end = Math.Min(At(clip.End), At(rangeEnd));
-        // SourceIn - Start is invariant under a razor cut. Rounding each in-point separately
+        // SourceIn * TimeRatio - Start (in stretched-source time) is invariant under a razor cut. Rounding each in-point separately
         // would occasionally shift the right fragment by one sample.
-        var mapping = checked((long)Math.Round(Math.Round((clip.SourceIn - clip.Start) * Rate, 6), MidpointRounding.AwayFromZero));
+        var mapping = checked((long)Math.Round(Math.Round((clip.SourceIn * clip.TimeRatio - clip.Start) * Rate, 6), MidpointRounding.AwayFromZero));
         var sourceFirst = checked(first + mapping);
         return new(first, sourceFirst, Math.Max(0, end - first), Math.Max(0, first - At(rangeStart)));
     }

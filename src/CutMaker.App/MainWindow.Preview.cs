@@ -71,7 +71,7 @@ public partial class MainWindow
                 var position = PreviewPositionSeconds;
                 _previewPlaybackFarthest = Math.Max(_previewPlaybackFarthest, position);
                 PlayheadSeconds = Math.Clamp(_previewRangeStart + position, 0, PreviewDuration);
-                if (CheckAuditionEnd(_previewRangeStart + position)) return;
+                if (CheckAuditionEnd(_previewRangeStart + position) || CheckPlaybackRangeEnd(_previewRangeStart + position)) return;
                 if (_audioDevice is { Ended: true })
                 {
                     PausePreview();
@@ -395,7 +395,7 @@ public partial class MainWindow
         // A clock sample from this Play/Seek session can still prove the full tail ran.
         var reached = Math.Max(PreviewPlayer.Position.TotalSeconds, _previewPlaybackFarthest);
         if (Math.Abs(reached - duration) > Math.Min(.12, duration / 4)) return;
-        if (CheckAuditionEnd(_previewRangeEnd)) return;
+        if (CheckAuditionEnd(_previewRangeEnd) || CheckPlaybackRangeEnd(_previewRangeEnd)) return;
         PausePreview();
         PlayheadSeconds = _previewRangeEnd;
     }
@@ -448,6 +448,8 @@ public partial class MainWindow
     private void StartPreviewPlayback()
     {
         if (!PreviewIsReady) return;
+        if (_auditionEnd is null && EffectivePlaybackRange is { } range &&
+            (PlayheadSeconds < range.Start || PlayheadSeconds >= range.End - .000001)) SeekPreview(range.Start);
         if (PlayheadSeconds >= PreviewDuration - 0.00001) SeekPreview(0);
         if (!PreviewContains(PlayheadSeconds)) return;
         _previewFrameCancellation?.Cancel();
@@ -456,7 +458,12 @@ public partial class MainWindow
         _previewPlaybackFarthest = Math.Max(0, PlayheadSeconds - _previewRangeStart);
         try
         {
-            if (_audioDevice is { } audio) audio.Resume();
+            if (_audioDevice is { } audio)
+            {
+                var end = _auditionEnd ?? EffectivePlaybackRange?.End;
+                audio.SetPlaybackEnd(end is { } boundary ? AudioSampleClock.At(boundary) : null);
+                audio.Resume();
+            }
             else PreviewPlayer.Play();
         }
         catch (Exception ex) when (_audioDevice is not null && ex is InvalidOperationException or IOException)
@@ -563,6 +570,8 @@ public partial class MainWindow
     {
         if (!double.IsFinite(seconds)) return;
         if (!preserveAudition) { _auditionRequest++; ClearAudition(); }
+        if (_previewPlaying && _auditionEnd is null && EffectivePlaybackRange is { } range && (seconds < range.Start || seconds >= range.End))
+            PausePreview();
         PlayheadSeconds = Math.Clamp(seconds, 0, PreviewDuration);
         _previewPlaybackFarthest = Math.Max(0, PlayheadSeconds - _previewRangeStart);
         if (PreviewIsReady && (PreviewContains(PlayheadSeconds) || PlayheadSeconds == _previewRangeEnd))
@@ -572,7 +581,12 @@ public partial class MainWindow
             PreviewHint.Visibility = Visibility.Collapsed;
             try
             {
-                if (_audioDevice is { } audio) audio.Seek(AudioSampleClock.At(PlayheadSeconds));
+                if (_audioDevice is { } audio)
+                {
+                    var boundary = _auditionEnd ?? (_previewPlaying ? EffectivePlaybackRange?.End : null);
+                    audio.SetPlaybackEnd(boundary is { } stop ? AudioSampleClock.At(stop) : null);
+                    audio.Seek(AudioSampleClock.At(PlayheadSeconds));
+                }
                 else PreviewPlayer.Position = TimeSpan.FromSeconds(PlayheadSeconds - _previewRangeStart);
             }
             catch (Exception ex) when (_audioDevice is not null && ex is InvalidOperationException or IOException)

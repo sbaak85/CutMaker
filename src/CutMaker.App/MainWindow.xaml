@@ -178,6 +178,11 @@
                             <TextBlock Grid.Row="2" Text="長度（秒）" /><TextBlock Grid.Row="2" Grid.Column="2" Text="音量（0–400%）" />
                             <TextBox x:Name="ClipDurationBox" Grid.Row="3" Margin="0,4,0,8" /><TextBox x:Name="ClipGainBox" Grid.Row="3" Grid.Column="2" Margin="0,4,0,8" />
                         </Grid>
+                        <TextBlock Text="時間比例（%）· 維持音高" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,4" />
+                        <DockPanel Margin="0,0,0,6">
+                            <Button x:Name="ApplyTimeRatioButton" Content="套用比例" DockPanel.Dock="Right" Click="ApplyTimeRatio_Click" ToolTip="獨立音檔：80% 變短、120% 變長；25%–400%" />
+                            <TextBox x:Name="ClipTimeRatioBox" ToolTip="100% 為原長；80% 是 1.25 倍速，120% 約 0.833 倍速" />
+                        </DockPanel>
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="8" /><ColumnDefinition /></Grid.ColumnDefinitions>
                             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
@@ -241,12 +246,12 @@
             <Grid>
                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="50" /><RowDefinition /><RowDefinition Height="20" /></Grid.RowDefinitions>
                 <WrapPanel>
-                    <TextBlock Text="時間軸" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,22,0" />
+                    <TextBlock x:Name="TimelineToolbarTitle" Text="時間軸" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,22,0" />
                     <Button Content="＋ 影片軌" Click="AddVideo_Click" Padding="12,6" />
                     <Button Content="＋ 音訊軌" Click="AddAudio_Click" Padding="12,6" />
                     <Button x:Name="RemoveClipButton" Content="移除片段" Click="RemoveClip_Click" Padding="12,6" IsEnabled="False" ToolTip="選取片段後按 Delete；來源檔案會保留" />
                     <Button x:Name="SplitClipButton" Content="切割" Click="SplitClip_Click" Padding="12,6" ToolTip="將選取片段在播放頭位置切開 · B" />
-                    <Button Content="試聽接點" Click="Audition_Click" Padding="12,6" ToolTip="播放播放頭前後各 2 秒 · Ctrl+Shift+Space" />
+                    <Button Content="播放框" Click="PlaybackRange_Click" Padding="12,6" ToolTip="限制播放範圍／循環；拖曳框的左右邊線可調整" /><Button Content="試聽接點" Click="Audition_Click" Padding="12,6" ToolTip="播放播放頭前後各 2 秒 · Ctrl+Shift+Space" />
                     <Menu Background="Transparent" Foreground="#EAF0FA" Margin="0,0,8,8" VerticalAlignment="Center">
                         <MenuItem Header="編輯 ▾" Padding="8,7" Background="#253247" Foreground="#EAF0FA">
                             <MenuItem.Resources><Style TargetType="MenuItem"><Setter Property="Foreground" Value="#17202E" /></Style></MenuItem.Resources>
@@ -323,6 +328,15 @@
                     </ItemsControl>
                 </ScrollViewer>
                     <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Center" VerticalAlignment="Stretch" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" DragDelta="TrackHeader_DragDelta" DragCompleted="Splitter_DragCompleted" AutomationProperties.Name="調整軌道名稱寬度" />
+                    <Canvas x:Name="PlaybackRangeCanvas" Grid.ColumnSpan="3" ClipToBounds="True" Visibility="Collapsed">
+                        <Rectangle x:Name="PlaybackRangeOutline" IsHitTestVisible="False" Stroke="#FFF176" StrokeThickness="1.5" Fill="#08FFF176" />
+                        <Thumb x:Name="PlaybackRangeStartHandle" Width="8" Cursor="SizeWE" Focusable="True" FocusVisualStyle="{x:Null}" ToolTip="拖曳播放框頭；Esc 取消" DragStarted="PlaybackRange_DragStarted" DragDelta="PlaybackRange_DragDelta" DragCompleted="PlaybackRange_DragCompleted" PreviewKeyDown="PlaybackRange_KeyDown">
+                            <Thumb.Template><ControlTemplate TargetType="Thumb"><Grid Background="Transparent"><Border Width="2" Background="#FFF176" HorizontalAlignment="Center" /></Grid></ControlTemplate></Thumb.Template>
+                        </Thumb>
+                        <Thumb x:Name="PlaybackRangeEndHandle" Width="8" Cursor="SizeWE" Focusable="True" FocusVisualStyle="{x:Null}" ToolTip="拖曳播放框尾；Esc 取消" DragStarted="PlaybackRange_DragStarted" DragDelta="PlaybackRange_DragDelta" DragCompleted="PlaybackRange_DragCompleted" PreviewKeyDown="PlaybackRange_KeyDown">
+                            <Thumb.Template><ControlTemplate TargetType="Thumb"><Grid Background="Transparent"><Border Width="2" Background="#FFF176" HorizontalAlignment="Center" /></Grid></ControlTemplate></Thumb.Template>
+                        </Thumb>
+                    </Canvas>
                     <Canvas Grid.ColumnSpan="3" IsHitTestVisible="False" ClipToBounds="True">
                         <Border x:Name="SnapToggleHint" Visibility="Collapsed" Background="#EE171C18" BorderBrush="#74D28B" BorderThickness="1" Padding="14,5" MinWidth="130">
                             <TextBlock x:Name="SnapToggleHintText" Foreground="#FFF4CF" TextAlignment="Center" />

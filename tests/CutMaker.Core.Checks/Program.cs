@@ -3,6 +3,7 @@ using CutMaker.Core;
 
 var checks = new (string Name, Action Run)[]
 {
+    ("Time ratios preserve source spans, trims, split continuity and saved ranges", TimeRatioChecks.Run),
     ("Trim head preserves source alignment and original record", TrimHead),
     ("Trim tail can restore source and clamps fades", TrimTail),
     ("Invalid trim and split boundaries are rejected", InvalidEdits),

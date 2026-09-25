@@ -20,6 +20,9 @@ public static class ProjectValidator
         Require(project.MediaAssets is not null && project.Tracks is not null && project.Clips is not null,
             "Project collections are required.");
 
+        if (project.PlaybackRange is { } range)
+            Require(double.IsFinite(range.Start) && double.IsFinite(range.End) && range.Start >= 0 && range.End > range.Start,
+                "播放框的結束時間必須大於起點，且時間必須為有限非負數。");
         var assets = new Dictionary<string, MediaAsset>(StringComparer.Ordinal);
         foreach (var asset in project.MediaAssets!)
         {
@@ -54,6 +57,8 @@ public static class ProjectValidator
             Require(tracks.TryGetValue(clip.TrackId, out var track), $"Missing track: {clip.TrackId}");
             Require(track!.Kind == TrackKind.Audio ? asset!.Kind != MediaKind.Image : asset!.Kind != MediaKind.Audio,
                 "The media kind is incompatible with its track.");
+            Require(clip.TimeRatio == 1 || (asset.Kind == MediaKind.Audio && clip.LinkGroupId is null),
+                "時間比例適用於獨立音檔；連結的影片音訊請先解除連結。");
             ValidateClip(clip, asset.Duration, asset.Kind == MediaKind.Image);
         }
     }
@@ -65,6 +70,7 @@ public static class ProjectValidator
         NonNegativeTime(clip.Start, "Clip start");
         NonNegativeTime(clip.SourceIn, "Clip source in-point");
         PositiveTime(clip.Duration, "Clip duration");
+        Require(double.IsFinite(clip.TimeRatio) && clip.TimeRatio is >= .25 and <= 4, "時間比例須介於 25% 與 400%。");
         Require(double.IsFinite(clip.End) && double.IsFinite(clip.SourceEnd), "Clip end time is out of range.");
         // Early projects stored a source offset when trimming stills. Keep those files readable;
         // new still trims/splits canonicalize the meaningless offset to zero.

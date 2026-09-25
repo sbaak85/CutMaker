@@ -130,6 +130,43 @@ public partial class MainWindow
             await Until(() => PlayheadSeconds < 3.3, "loop audition returns to its start");
             Check(_previewPlaying && ReferenceEquals(device, _audioDevice), "loop audition reuses the prepared device");
             SeekPreview(1); Check(_auditionEnd is null, "manual navigation exits the audition range"); PausePreview();
+            SelectTimelineClipForChecks("a");
+            ((System.Windows.Controls.TextBox)FindName("ClipTimeRatioBox")).Text = "80";
+            ApplyTimeRatio_Click(this, new RoutedEventArgs());
+            Check(Math.Abs(_project.Clips[0].Duration - 3.6) < 1e-8 && _project.Clips[0].TimeRatio == .8,
+                "time-ratio inspector applies 80 percent duration to audio");
+            UndoEdit(); Check(_project.Clips[0].Duration == 4.5, "Undo restores the original time ratio"); RedoEdit();
+            SetPlaybackRange(new(.5, 1.1));
+            TimelineZoom.Value = 120; TimelineOffsetSeconds = 0; UpdateLayout();
+            Check(PlaybackRangeOutline.Visibility == Visibility.Visible && Math.Abs(PlaybackRangeOutline.Width - .6 * TimelinePixelsPerSecond) < .01,
+                "playback rectangle spans its exact timeline interval");
+            capture("workspace-time-ratio-playback-range.png");
+            var savedRange = _project.PlaybackRange;
+            PlaybackRange_DragStarted(PlaybackRangeEndHandle, new System.Windows.Controls.Primitives.DragStartedEventArgs(0, 0));
+            PlaybackRange_DragDelta(PlaybackRangeEndHandle, new System.Windows.Controls.Primitives.DragDeltaEventArgs(24, 0));
+            PlaybackRange_DragCompleted(PlaybackRangeEndHandle, new System.Windows.Controls.Primitives.DragCompletedEventArgs(24, 0, true));
+            Check(_project.PlaybackRange == savedRange, "canceled playback-edge drag preserves saved range");
+            PlaybackRange_DragStarted(PlaybackRangeEndHandle, new System.Windows.Controls.Primitives.DragStartedEventArgs(0, 0));
+            PlaybackRange_DragDelta(PlaybackRangeEndHandle, new System.Windows.Controls.Primitives.DragDeltaEventArgs(24, 0));
+            PlaybackRange_DragCompleted(PlaybackRangeEndHandle, new System.Windows.Controls.Primitives.DragCompletedEventArgs(24, 0, false));
+            Check(Math.Abs(_project.PlaybackRange!.End - 1.3) < 1e-8, "dragging range edge changes its timeline endpoint");
+            UndoEdit(); Check(_project.PlaybackRange == savedRange, "range edge edit is one reversible edit");
+            SeekPreview(2); await PreparePreviewAsync(); StartPreviewPlayback();
+            Check(_previewPlaying && Math.Abs(PlayheadSeconds - .5) < .01, "play outside range starts at the range head");
+            await Until(() => !_previewPlaying, "playback range stops automatically by default");
+            Check(Math.Abs(PlayheadSeconds - 1.1) < 1e-8 && _audioDevice!.PositionFrames == AudioSampleClock.At(1.1),
+                "playback range stops audio at the exact end sample");
+            SetPlaybackRange(savedRange! with { Loop = true });
+            await PreparePreviewAsync(); SeekPreview(1.03); StartPreviewPlayback();
+            await Until(() => PlayheadSeconds < .8, "playback range loops back to its head");
+            Check(_previewPlaying, "range loop remains playing"); PausePreview();
+            SeekPreview(2); _auditionLoop = false; await AuditionJunctionAsync();
+            Check(_auditionStart == .5 && _auditionEnd == 1.1, "junction audition also stays within the enabled playback range");
+            PausePreview(); ClearAudition();
+            SetPlaybackRange(savedRange with { Enabled = false });
+            SeekPreview(2); StartPreviewPlayback();
+            Check(_previewPlaying && Math.Abs(PlayheadSeconds - 2) < .01, "disabled range permits playback outside its bounds"); PausePreview();
+            SetPlaybackRange(null); Check(PlaybackRangeCanvas.Visibility == Visibility.Collapsed, "removing range hides its rectangle");
             File.WriteAllLines(Path.Combine(folder, "interaction-result.txt"), report);
         }
         finally

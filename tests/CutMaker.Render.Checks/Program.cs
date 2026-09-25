@@ -8,6 +8,11 @@ try
 {
 var folder = Path.GetFullPath(args.FirstOrDefault() ?? Path.Combine("runtime", "render-checks"));
 Directory.CreateDirectory(folder);
+if (args.Contains("--tempo-only"))
+{
+    await TempoChecks.Run(Path.Combine(folder, "tempo"), (ok, message) => { if (!ok) throw new Exception(message); Console.WriteLine("PASS: " + message); });
+    return;
+}
 if (args.Contains("--mixer-only"))
 {
     await AudioTimelinePreviewChecks.Run(Path.Combine(folder, "audio-timeline-preview"), (condition, message) =>
@@ -57,6 +62,7 @@ void Check(bool condition, string message)
 Task<string> Run(params string[] values) => MediaRenderService.RunToolAsync(ffmpeg,
     new[] { "-hide_banner", "-loglevel", "error", "-nostdin", "-y" }.Concat(values), CancellationToken.None);
 PreviewRenderCacheChecks.Run(Path.Combine(folder, "preview-cache"), Check);
+await TempoChecks.Run(Path.Combine(folder, "tempo"), Check);
 var colorPath = Path.Combine(folder, "原片 [保留]; ' 雙色與音訊.mp4");
 var bluePath = Path.Combine(folder, "blue-no-audio.mp4");
 var tonePath = Path.Combine(folder, "tone-880.wav");

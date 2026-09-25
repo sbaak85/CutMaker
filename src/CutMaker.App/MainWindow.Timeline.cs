@@ -50,9 +50,9 @@ public partial class MainWindow
         {
             var track = _project.Tracks[index];
             var clips = grouped[track.Id].OrderBy(clip => clip.Start)
-                .Select(clip => new TimelineClipView(clip.Id, (clip.LinkGroupId is null ? "" : "↔ ") + Path.GetFileName(assets[clip.AssetId].Path), track.Kind == TrackKind.Audio ? MediaKind.Audio : assets[clip.AssetId].Kind, clip.Start, clip.Duration,
+                .Select(clip => new TimelineClipView(clip.Id, (clip.LinkGroupId is null ? "" : "↔ ") + Path.GetFileName(assets[clip.AssetId].Path) + (assets[clip.AssetId].Kind == MediaKind.Audio ? $" · {clip.TimeRatio * 100:0.##}%" : ""), track.Kind == TrackKind.Audio ? MediaKind.Audio : assets[clip.AssetId].Kind, clip.Start, clip.Duration,
                     clip.FadeIn?.Duration ?? 0, clip.FadeOut?.Duration ?? 0, GetMediaVisuals(clip.AssetId)?.Thumbnail, GetMediaVisuals(clip.AssetId)?.Waveform,
-                    clip.SourceIn, assets[clip.AssetId].Duration, clip.FadeIn, clip.FadeOut)).Select(WithWaveDetail).ToArray();
+                    clip.SourceIn, assets[clip.AssetId].Duration, clip.FadeIn, clip.FadeOut, TimeRatio: clip.TimeRatio)).Select(WithWaveDetail).ToArray();
             var row = _timelineRows.FirstOrDefault(item => item.Id == track.Id);
             if (row is null) _timelineRows.Insert(index, new(track, IsTrackCollapsed(track.Id), clips));
             else
@@ -92,7 +92,7 @@ public partial class MainWindow
         if ((modifiers & ModifierKeys.Control) == 0 || delta == 0 || !double.IsFinite(pointerX) ||
             pointerX < 0 || pointerX > TimelineViewportWidth) return false;
         // Keep captured trim/move/scrub coordinates stable until the current gesture ends.
-        if (_pointerOriginal is not null || IsMarqueeSelecting || _draggingFromLibrary || _previewScrubbing) return true;
+        if (_pointerOriginal is not null || _rangeDragOriginal is not null || IsMarqueeSelecting || _draggingFromLibrary || _previewScrubbing) return true;
         UpdateTimelineViewport();
         var oldScale = TimelinePixelsPerSecond;
         var anchorTime = TimelineOffsetSeconds + pointerX / oldScale;
@@ -140,7 +140,7 @@ public partial class MainWindow
             TimelineHorizontalScroll.LargeChange = Math.Max(1, visibleSeconds * 0.8);
             TimelineOffsetSeconds = Math.Clamp(TimelineOffsetSeconds, 0, TimelineHorizontalScroll.Maximum);
         }
-        finally { _updatingTimelineViewport = false; }
+        finally { _updatingTimelineViewport = false; RefreshPlaybackRangeVisual(); }
     }
 
     private void AssetGrid_MouseDown(object sender, MouseButtonEventArgs e)

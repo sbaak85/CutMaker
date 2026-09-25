@@ -276,6 +276,7 @@ public partial class MainWindow : Window
             var availableWidth = Math.Max(0, client.ActualWidth - RootLayout.Margin.Left - RootLayout.Margin.Right);
             var availableHeight = Math.Max(0, client.ActualHeight - RootLayout.Margin.Top - RootLayout.Margin.Bottom);
             var compactHeight = availableHeight < 540;
+            TimelineToolbarTitle.Visibility = availableWidth < 1000 ? Visibility.Collapsed : Visibility.Visible;
             var headerHeight = compactHeight ? 34 : 58;
             TimelinePanel.Padding = compactHeight ? new Thickness(14, 6, 14, 6) : new Thickness(14);
             RootLayout.RowDefinitions[0].Height = new GridLength(headerHeight);

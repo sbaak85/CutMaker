@@ -20,6 +20,7 @@ internal sealed class AudioTimelinePreview : IDisposable
     private Fragment[] _fragments;
     private string? _controlShapeKey;
     private bool _disposed;
+    private TempoPreparedProject? _tempo;
 
     private sealed class Source(string path, long firstFrame, AudioPreviewCache.Lease? lease, bool owned, ProgressiveAudioSource? progressive = null) : IDisposable
     {
@@ -65,7 +66,8 @@ internal sealed class AudioTimelinePreview : IDisposable
         };
         ProjectValidator.Validate(project);
         var controlShapeKey = ControlShapeKey(project);
-        cancellationToken.ThrowIfCancellationRequested();
+        var tempo = await TempoPreparedProject.PrepareAsync(project, null, progress, cancellationToken).ConfigureAwait(false);
+        project = tempo.Project;
         var duration = project.Clips.Count == 0 ? 0 : project.Clips.Max(clip => clip.End);
         var assets = project.MediaAssets.ToDictionary(asset => asset.Id);
         var tracks = project.Tracks.ToDictionary(track => track.Id);
@@ -124,11 +126,12 @@ internal sealed class AudioTimelinePreview : IDisposable
             }
             cancellationToken.ThrowIfCancellationRequested();
             progress?.Report(new(1, "音訊已就緒；播放時即時混音。"));
-            return new(AudioSampleClock.At(duration), sources.Values.ToArray(), fragments.ToArray()) { _controlShapeKey = controlShapeKey };
+            return new(AudioSampleClock.At(duration), sources.Values.ToArray(), fragments.ToArray()) { _controlShapeKey = controlShapeKey, _tempo = tempo };
         }
         catch
         {
             foreach (var source in sources.Values) source.Dispose();
+            tempo.Dispose();
             throw;
         }
     }
@@ -295,6 +298,7 @@ internal sealed class AudioTimelinePreview : IDisposable
             if (_disposed) return;
             _disposed = true;
             foreach (var source in _sources) source.Dispose();
+            _tempo?.Dispose(); _tempo = null;
         }
     }
 }

@@ -11,7 +11,7 @@ internal enum PointerEdit { Move, TrimStart, TrimEnd, FadeIn, FadeOut }
 public sealed record TimelineClipView(string Id, string Name, MediaKind Kind, double Start, double Duration, double FadeIn = 0, double FadeOut = 0,
     ImageSource? Thumbnail = null, ImageSource? Waveform = null, double SourceIn = 0, double SourceDuration = 0,
     FadeSettings? FadeInSettings = null, FadeSettings? FadeOutSettings = null,
-    double WaveformStart = 0, double WaveformDuration = 0);
+    double WaveformStart = 0, double WaveformDuration = 0, double TimeRatio = 1);
 public sealed record TimelineMoveGhost(string Id, double Start, double Duration);
 
 /// <summary>A viewport-sized, retained-data lane. Drawing never changes clip timing or source media.</summary>
@@ -276,8 +276,8 @@ public sealed class TimelineLane : FrameworkElement
             if (clip.Waveform is not null && clip.SourceDuration > 0)
             {
                 // The cached waveform spans the source. Use source coordinates so trimmed clips stay aligned.
-                var sourceWidth = (clip.WaveformDuration > 0 ? clip.WaveformDuration : clip.SourceDuration) * PixelsPerSecond;
-                drawing.DrawImage(clip.Waveform, new Rect(actualLeft + (clip.WaveformStart - clip.SourceIn) * PixelsPerSecond,
+                var sourceWidth = (clip.WaveformDuration > 0 ? clip.WaveformDuration : clip.SourceDuration) * PixelsPerSecond * clip.TimeRatio;
+                drawing.DrawImage(clip.Waveform, new Rect(actualLeft + (clip.WaveformStart - clip.SourceIn) * PixelsPerSecond * clip.TimeRatio,
                     visualRect.Top, sourceWidth, visualRect.Height));
             }
             if (clip.Thumbnail is not null && clip.Kind != MediaKind.Audio)

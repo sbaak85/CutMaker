@@ -15,5 +15,6 @@
     <Compile Include="..\..\src\CutMaker.App\ManagedMediaCache.cs" Link="ManagedMediaCache.cs" />
     <Compile Include="..\..\src\CutMaker.App\ProgressiveAudioSource.cs" Link="ProgressiveAudioSource.cs" />
     <Compile Include="..\..\src\CutMaker.App\VideoRegionPreview.cs" Link="VideoRegionPreview.cs" />
+    <Compile Include="..\..\src\CutMaker.App\TempoPreparedProject.cs" Link="TempoPreparedProject.cs" />
   </ItemGroup>
 </Project>

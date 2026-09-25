@@ -172,7 +172,7 @@ internal sealed class PreviewRenderCache : IDisposable
                 if (slice.Length == 0) continue;
                 var fadeIn = ActiveFade(clip.SeparateAudioFades ? clip.AudioFadeIn : clip.FadeIn);
                 var fadeOut = ActiveFade(clip.SeparateAudioFades ? clip.AudioFadeOut : clip.FadeOut);
-                var span = new AudioSpan(Source(assets[clip.AssetId]), slice.TimelineStart, slice.TimelineStart + slice.Length,
+                var span = new AudioSpan(Source(assets[clip.AssetId]) + "\nratio=" + clip.TimeRatio.ToString("R", CultureInfo.InvariantCulture), slice.TimelineStart, slice.TimelineStart + slice.Length,
                     slice.SourceStart - slice.TimelineStart, clip.Gain * track.Volume, fadeIn, fadeOut, clip.Start, clip.Duration);
                 // Only merge provably identical flat sample sequences. General sliced fades
                 // remain distinct instead of risking a false hit after a real envelope edit.

@@ -26,11 +26,13 @@ public sealed record Clip(
     double Start, double SourceIn, double Duration,
     double Gain = 1, FadeSettings? FadeIn = null, FadeSettings? FadeOut = null,
     FadeSettings? AudioFadeIn = null, FadeSettings? AudioFadeOut = null, bool SeparateAudioFades = false,
-    VideoFadeMode VideoFadeMode = VideoFadeMode.Opacity, string? LinkGroupId = null, bool SourceAudioMuted = false)
+    VideoFadeMode VideoFadeMode = VideoFadeMode.Opacity, string? LinkGroupId = null, bool SourceAudioMuted = false, double TimeRatio = 1)
 {
     public double End => Start + Duration;
-    public double SourceEnd => SourceIn + Duration;
+    public double SourceEnd => SourceIn + Duration / TimeRatio;
 }
+
+public sealed record PlaybackRange(double Start, double End, bool Enabled = true, bool Loop = false);
 
 public sealed record CutProject
 {
@@ -42,6 +44,7 @@ public sealed record CutProject
     public List<MediaAsset> MediaAssets { get; init; } = [];
     public List<Track> Tracks { get; init; } = [];
     public List<Clip> Clips { get; init; } = [];
+    public PlaybackRange? PlaybackRange { get; init; }
 
     public static CutProject CreateEmpty(string title = "Untitled") => new()
     {

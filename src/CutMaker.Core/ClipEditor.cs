@@ -10,7 +10,7 @@ public static class ClipEditor
         var result = ClampFades(clip with
         {
             Start = newTimelineStart,
-            SourceIn = isStillImage ? 0 : clip.SourceIn + delta,
+            SourceIn = isStillImage ? 0 : clip.SourceIn + delta / clip.TimeRatio,
             Duration = clip.Duration - delta
         });
         ProjectValidator.ValidateClip(result, assetDuration, isStillImage);
@@ -46,9 +46,20 @@ public static class ClipEditor
         return (left, right);
     }
 
+    /// <summary>Retain the same source interval, scaling timeline duration and fade times.</summary>
+    public static Clip ChangeTimeRatio(Clip clip, double ratio)
+    {
+        ProjectValidator.Require(double.IsFinite(ratio) && ratio is >= .25 and <= 4, "時間比例須介於 25% 與 400%。");
+        var scale = ratio / clip.TimeRatio;
+        FadeSettings? Scale(FadeSettings? fade) => fade is null ? null : fade with { Duration = fade.Duration * scale };
+        return clip with { TimeRatio = ratio, Duration = clip.Duration * scale,
+            FadeIn = Scale(clip.FadeIn), FadeOut = Scale(clip.FadeOut),
+            AudioFadeIn = Scale(clip.AudioFadeIn), AudioFadeOut = Scale(clip.AudioFadeOut) };
+    }
+
     private static Clip Slice(Clip clip, double offset, double duration, string id, bool isStillImage) => clip with
     {
-        Id = id, Start = clip.Start + offset, SourceIn = isStillImage ? 0 : clip.SourceIn + offset, Duration = duration,
+        Id = id, Start = clip.Start + offset, SourceIn = isStillImage ? 0 : clip.SourceIn + offset / clip.TimeRatio, Duration = duration,
         FadeIn = FadeEnvelope.SliceIn(clip.FadeIn, offset, duration),
         FadeOut = FadeEnvelope.SliceOut(clip.FadeOut, clip.Duration, offset, duration),
         AudioFadeIn = FadeEnvelope.SliceIn(clip.AudioFadeIn, offset, duration),

@@ -16,7 +16,10 @@ public partial class MainWindow
     {
         if (PreviewDuration <= 0) { StatusText.Text = "請先將素材放入軌道。"; return; }
         var center = PlayheadSeconds;
-        var start = Math.Max(0, center - 2); var end = Math.Min(PreviewDuration, center + 2);
+        var bounds = EffectivePlaybackRange;
+        if (bounds is not null) center = Math.Clamp(center, bounds.Start, bounds.End);
+        var start = Math.Max(bounds?.Start ?? 0, center - 2);
+        var end = Math.Min(bounds?.End ?? PreviewDuration, center + 2);
         if (end <= start) return;
         var key = PreviewContentKey(CreatePreviewSnapshot());
         PausePreview(); ClearAudition(); SeekPreview(start);

@@ -24,7 +24,7 @@ public partial class MainWindow
         if (repeat) return true;
         if (_panElement is not null && Mouse.MiddleButton == MouseButtonState.Pressed) return true;
         if (Mouse.LeftButton == MouseButtonState.Pressed &&
-            (IsMarqueeSelecting || _pointerOriginal is not null || _previewScrubbing)) return true;
+            (IsMarqueeSelecting || _pointerOriginal is not null || _previewScrubbing || _rangeDragOriginal is not null)) return true;
         // A handled/lost mouse-up must not leave a completed gesture swallowing every shortcut.
         EndMarqueeSelection(cancel: true);
         CancelPointerEdit();

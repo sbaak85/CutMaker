@@ -119,6 +119,9 @@ public partial class MainWindow
         if (FindName("ClipNameText") is TextBlock name)
             name.Text = clip is null ? "選取時間軸片段以編輯" : Path.GetFileName(_project.MediaAssets.First(asset => asset.Id == clip.AssetId).Path);
         SetNumber("ClipStartBox", clip?.Start); SetNumber("ClipSourceInBox", clip?.SourceIn);
+        SetNumber("ClipTimeRatioBox", clip?.TimeRatio * 100);
+        if (FindName("ApplyTimeRatioButton") is Button tempoButton)
+            tempoButton.IsEnabled = clip is not null && clip.LinkGroupId is null && _project.MediaAssets.First(a => a.Id == clip.AssetId).Kind == MediaKind.Audio;
         SetNumber("ClipDurationBox", clip?.Duration); SetNumber("ClipGainBox", clip?.Gain * 100);
         SetNumber("FadeInBox", clip is null ? null : clip.FadeIn?.Duration ?? 0);
         SetNumber("FadeOutBox", clip is null ? null : clip.FadeOut?.Duration ?? 0);
@@ -174,6 +177,13 @@ public partial class MainWindow
                 Gain = ReadNumber("ClipGainBox") / 100
             }), "已套用片段時間、音量與 Fade");
         }
+        catch (ProjectValidationException error) { StatusText.Text = error.Message; }
+    }
+
+    private void ApplyTimeRatio_Click(object sender, RoutedEventArgs e)
+    {
+        var clip = SelectedClip(); if (clip is null) return;
+        try { TryReplaceClip(ClipEditor.ChangeTimeRatio(clip, ReadNumber("ClipTimeRatioBox") / 100), "已套用時間比例（維持音高）"); }
         catch (ProjectValidationException error) { StatusText.Text = error.Message; }
     }
 
@@ -326,8 +336,8 @@ public partial class MainWindow
         var originalEdge = trimStart ? original.Start : original.End;
         var edge = SnapEditTime(Math.Max(0, originalEdge + pointerTime - pointerDownTime), original.Id);
         return trimStart
-            ? ClipEditor.TrimStart(original, Math.Clamp(edge, image ? 0 : Math.Max(0, original.Start - original.SourceIn), original.End - minimum), duration, image)
-            : ClipEditor.TrimEnd(original, Math.Clamp(edge, original.Start + minimum, image ? double.MaxValue : original.Start + duration - original.SourceIn), duration, image);
+            ? ClipEditor.TrimStart(original, Math.Clamp(edge, image ? 0 : Math.Max(0, original.Start - original.SourceIn * original.TimeRatio), original.End - minimum), duration, image)
+            : ClipEditor.TrimEnd(original, Math.Clamp(edge, original.Start + minimum, image ? double.MaxValue : original.Start + (duration - original.SourceIn) * original.TimeRatio), duration, image);
     }
 
     internal double SnapEditTime(double time, string clipId, double duration = 0)

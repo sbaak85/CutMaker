@@ -10,7 +10,7 @@ internal static class ManagedMediaCache
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static readonly object Reservations = new();
     private static long _reservedBytes;
-    private static readonly string[] Folders = ["audio-preview", "media-visuals", "video-regions", "video-proxies"];
+    private static readonly string[] Folders = ["audio-preview", "media-visuals", "video-regions", "video-proxies", "audio-stretched"];
     internal static string Hash(string identity) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity))).ToLowerInvariant();
     internal static IDisposable Reserve(long bytes)
     {
@@ -37,7 +37,7 @@ internal static class ManagedMediaCache
     internal static async Task<Lease> GetAsync(string folder, string key, string extension,
         Func<string, CancellationToken, Task> create, CancellationToken token)
     {
-        if (!Folders.Contains(folder) || key.Length != 64 || !key.All(Uri.IsHexDigit) || extension != ".mp4")
+        if (!Folders.Contains(folder) || key.Length != 64 || !key.All(Uri.IsHexDigit) || (extension != ".mp4" && !(folder == "audio-stretched" && extension == ".wav")))
             throw new ArgumentException("Invalid owned cache name.");
         await Gate.WaitAsync(token).ConfigureAwait(false);
         try
@@ -69,7 +69,8 @@ internal static class ManagedMediaCache
         {
             var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
             if (stream.Length == 0) { stream.Dispose(); TryDelete(path); return null; }
-            try { File.SetLastWriteTimeUtc(path, DateTime.UtcNow); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            // Derived WAV timestamps are source identity for the decoded PCM cache; keep them stable.
+            try { if (Path.GetExtension(path) != ".wav") File.SetLastWriteTimeUtc(path, DateTime.UtcNow); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             return new(path, stream, reused);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
@@ -82,7 +83,7 @@ internal static class ManagedMediaCache
             if (!Directory.Exists(path)) continue;
             foreach (var file in new DirectoryInfo(path).EnumerateFiles())
                 if (file.Name.Length > 64 && file.Name.AsSpan(0, 64).ToString().All(Uri.IsHexDigit) &&
-                    file.Extension is ".mp4" or ".f64" or ".png") yield return file;
+                    file.Extension is ".mp4" or ".f64" or ".png" or ".wav") yield return file;
         }
     }
     internal static long UsageBytes() => OwnedFiles().Sum(file => file.Length);

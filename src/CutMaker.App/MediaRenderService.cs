@@ -44,6 +44,16 @@ public static partial class MediaRenderService
         if (paths.Values.Any(path => string.Equals(output, path, StringComparison.OrdinalIgnoreCase)) ||
             (projectPath is not null && string.Equals(output, Path.GetFullPath(projectPath), StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("匯出檔案不能覆蓋來源素材或目前專案，請另選檔名。");
+        using var tempo = await TempoPreparedProject.PrepareAsync(
+            options.FrameOnly || options.VideoOnly ? project with { Clips = project.Clips.Where(c => c.TimeRatio == 1).ToList() } : project,
+            projectPath, progress, cancellationToken).ConfigureAwait(false);
+        if (!options.FrameOnly && !options.VideoOnly)
+        {
+            project = tempo.Project;
+            assets = project.MediaAssets.ToDictionary(asset => asset.Id);
+            paths = assets.ToDictionary(pair => pair.Key, pair => Path.IsPathRooted(pair.Value.Path) || projectPath is null
+                ? Path.GetFullPath(pair.Value.Path) : ProjectStore.ResolveAssetPath(projectPath, pair.Value));
+        }
         var timelineDuration = project.Clips.Max(clip => clip.End);
         var rangeStart = options.OutputStart ?? 0;
         var rangeEnd = options.OutputEnd ?? timelineDuration;

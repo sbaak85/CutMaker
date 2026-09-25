@@ -20,6 +20,7 @@ public partial class MainWindow
     }
     private void QueueWaveDetails()
     {
+        RefreshPlaybackRangeVisual();
         if (!_waveDetailsInitialized || _mediaVisualStopped) return;
         _waveDetailCancellation?.Cancel();
         _waveDetailTimer.Stop(); _waveDetailTimer.Start();
@@ -27,8 +28,8 @@ public partial class MainWindow
     private TimelineClipView WithWaveDetail(TimelineClipView view)
     {
         if (!_waveDetails.TryGetValue(view.Id, out var detail)) return view;
-        var visibleFirst = view.SourceIn + Math.Max(0, TimelineOffsetSeconds - view.Start);
-        var visibleEnd = view.SourceIn + Math.Min(view.Duration, TimelineOffsetSeconds + Math.Max(1, TimelineTimeRuler.ActualWidth) / TimelinePixelsPerSecond - view.Start);
+        var visibleFirst = view.SourceIn + Math.Max(0, TimelineOffsetSeconds - view.Start) / view.TimeRatio;
+        var visibleEnd = view.SourceIn + Math.Min(view.Duration, TimelineOffsetSeconds + Math.Max(1, TimelineTimeRuler.ActualWidth) / TimelinePixelsPerSecond - view.Start) / view.TimeRatio;
         return detail.Start <= visibleFirst && detail.Start + detail.Duration >= visibleEnd
             ? view with { Waveform = detail.Image, WaveformStart = detail.Start, WaveformDuration = detail.Duration } : view;
     }
@@ -53,10 +54,10 @@ public partial class MainWindow
                     if (!clips.TryGetValue(view.Id, out var clip)) continue;
                     var asset = assets[clip.AssetId];
                     if (asset.Kind == MediaKind.Video && GetMediaVisuals(asset.Id)?.Waveform is null) continue;
-                    if (asset.Kind == MediaKind.Image || asset.Duration * TimelinePixelsPerSecond <= 2048 ||
+                    if (asset.Kind == MediaKind.Image || asset.Duration * TimelinePixelsPerSecond * clip.TimeRatio <= 2048 ||
                         clip.End <= TimelineOffsetSeconds || clip.Start >= TimelineOffsetSeconds + lane.ActualWidth / TimelinePixelsPerSecond) continue;
-                    var bucket = Math.Max(.25, Math.Pow(2, Math.Ceiling(Math.Log2(Math.Max(.25, lane.ActualWidth / TimelinePixelsPerSecond)))));
-                    var visibleFirst = clip.SourceIn + Math.Max(0, TimelineOffsetSeconds - clip.Start);
+                    var bucket = Math.Max(.25, Math.Pow(2, Math.Ceiling(Math.Log2(Math.Max(.25, lane.ActualWidth / TimelinePixelsPerSecond / clip.TimeRatio)))));
+                    var visibleFirst = clip.SourceIn + Math.Max(0, TimelineOffsetSeconds - clip.Start) / clip.TimeRatio;
                     var first = Math.Floor(visibleFirst / bucket) * bucket;
                     var duration = Math.Min(asset.Duration - first, bucket * 2);
                     if (duration <= 0) continue;
