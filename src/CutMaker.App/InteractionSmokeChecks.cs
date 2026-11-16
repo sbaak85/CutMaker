@@ -59,7 +59,8 @@ public partial class MainWindow
             Check(!TryHandleClipShortcut(Key.B, ModifierKeys.Control, false), "Ctrl+B no longer invokes splitting");
             Check(TryHandleClipShortcut(Key.B, ModifierKeys.None, false) && _project.Clips.Count == 3, "plain B splits at the playhead");
             UndoEdit(); SelectTimelineClipForChecks("a");
-            Check(TimelineTimeRuler.ActualHeight >= 42, "ruler offers a taller 42-DIP drag surface");
+            // Device-pixel rounding at fractional display scales can report slightly under 42 DIP.
+            Check(TimelineTimeRuler.ActualHeight >= 41.5, $"ruler offers a taller 42-DIP drag surface ({TimelineTimeRuler.ActualHeight:0.##})");
             var lane = FindLanes(TrackItems).Single(item => Equals(item.Tag, "a"));
             var gestureUndo = _undo.Count;
             BeginTimelineBlankGesture(3, lane, new(0, 20), ModifierKeys.None, captureMouse: false);

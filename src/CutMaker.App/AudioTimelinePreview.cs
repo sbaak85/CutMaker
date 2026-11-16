@@ -239,7 +239,19 @@ internal sealed class AudioTimelinePreview : IDisposable
         }
     }
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> AudioStreams = new(StringComparer.Ordinal);
+    // Probing starts a process; remember the answer so replaying after an edit stays instant.
     private static async Task<bool> HasAudioAsync(string path, CancellationToken cancellationToken)
+    {
+        var file = new FileInfo(path);
+        var identity = $"{file.FullName.ToUpperInvariant()}|{(file.Exists ? file.Length : -1)}|{(file.Exists ? file.LastWriteTimeUtc.Ticks : 0)}";
+        if (AudioStreams.TryGetValue(identity, out var known)) return known;
+        var result = await ProbeAudioAsync(path, cancellationToken).ConfigureAwait(false);
+        AudioStreams[identity] = result;
+        return result;
+    }
+
+    private static async Task<bool> ProbeAudioAsync(string path, CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(30));

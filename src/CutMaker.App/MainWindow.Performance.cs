@@ -9,11 +9,15 @@ public partial class MainWindow
 {
     private void Performance_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new Window { Title = "預覽與快取", Owner = this, Width = 480, Height = 420, MinWidth = 390, MinHeight = 320,
+        var dialog = new Window { Title = "預覽與快取", Owner = this, Width = 480, Height = 500, MinWidth = 390, MinHeight = 320,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = (Brush)FindResource("PanelBrush"), Foreground = Brushes.White };
         var panel = new StackPanel { Margin = new Thickness(20) };
         dialog.Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         void Label(string text) => panel.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 9, 0, 7) });
+        var live = new CheckBox { Content = "即時預覽：素材只暫存一次，剪輯後不需重新快取（建議）", Foreground = Brushes.White,
+            IsChecked = EditorPreferences.Current.LivePreview, Margin = new Thickness(0, 0, 0, 6) };
+        panel.Children.Add(live);
+        Label("關閉時改用舊方式：每次修改影音內容後重新製作整條播放檔。影格暫存約占每小時素材 1–5 GiB（依預覽品質），建議提高下方容量上限。");
         Label("影片預覽品質（匯出仍使用原始素材與輸出設定）");
         var quality = new ComboBox { ItemsSource = new[] { "低 · 最高寬 480", "中 · 最高寬 960", "高 · 最高寬 1280" }, SelectedIndex = (int)EditorPreferences.Current.PreviewQuality };
         panel.Children.Add(quality);
@@ -40,9 +44,9 @@ public partial class MainWindow
             try
             {
                 var previous = EditorPreferences.Current;
-                var next = previous with { CacheGiB = size, PreviewQuality = (PreviewQuality)quality.SelectedIndex, UseVideoProxies = proxies.IsChecked == true };
+                var next = previous with { CacheGiB = size, PreviewQuality = (PreviewQuality)quality.SelectedIndex, UseVideoProxies = proxies.IsChecked == true, LivePreview = live.IsChecked == true };
                 next.Save(); ManagedMediaCache.Prune(next.CacheBytes);
-                if (previous.PreviewQuality != next.PreviewQuality || previous.UseVideoProxies != next.UseVideoProxies)
+                if (previous.PreviewQuality != next.PreviewQuality || previous.UseVideoProxies != next.UseVideoProxies || previous.LivePreview != next.LivePreview)
                     if (!PreviewRenderCache.IsAudioOnly(_project)) InvalidatePreview();
                 dialog.DialogResult = true;
             }

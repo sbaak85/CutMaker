@@ -139,11 +139,17 @@
             <Border x:Name="PreviewPane" Grid.Column="2" Background="{StaticResource PanelBrush}" CornerRadius="6" Padding="14" Focusable="True" InputMethod.IsInputMethodEnabled="False">
                 <Grid>
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                    <DockPanel><TextBlock Text="預覽" FontSize="16" FontWeight="SemiBold" /><TextBlock x:Name="PreviewFormat" Text="1920 × 1080 · 30 fps" HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}" /></DockPanel>
+                    <DockPanel>
+                        <TextBlock Text="預覽" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <Button x:Name="CachePreviewButton" DockPanel.Dock="Right" Content="暫存快取" Click="CachePreview_Click" Padding="8,2" Margin="8,0,0,0" FontSize="12"
+                                ToolTip="預先載入素材（每個來源只需一次）。之後移動、修剪、切割與 Fade 都不需重新快取；再按一次可取消" />
+                        <TextBlock x:Name="PreviewFormat" Text="1920 × 1080 · 30 fps" HorizontalAlignment="Right" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Foreground="{StaticResource MutedBrush}" />
+                    </DockPanel>
                     <Border x:Name="PreviewSurface" Grid.Row="1" Background="#090D13" Margin="0,10,0,8" CornerRadius="4" MinHeight="32" MouseLeftButtonDown="PreviewSurface_MouseDown">
                         <Grid>
                             <MediaElement x:Name="PreviewPlayer" LoadedBehavior="Manual" UnloadedBehavior="Manual" Stretch="Uniform"
                                           MediaOpened="PreviewPlayer_MediaOpened" MediaEnded="PreviewPlayer_MediaEnded" MediaFailed="PreviewPlayer_MediaFailed" />
+                            <local:LiveFrameView x:Name="PreviewLiveView" IsHitTestVisible="False" Visibility="Collapsed" />
                             <Image x:Name="PreviewStillImage" Stretch="Uniform" IsHitTestVisible="False" Visibility="Collapsed" />
                             <TextBlock x:Name="PreviewHint" Text="放入片段後，按更新預覽" Foreground="#C5D2E4" TextAlignment="Center" TextWrapping="Wrap" VerticalAlignment="Center" Margin="12" IsHitTestVisible="False" />
                         </Grid>
@@ -152,7 +158,7 @@
                         <Slider x:Name="PreviewSeekSlider" Minimum="0" Maximum="1" ValueChanged="PreviewSeek_ValueChanged" IsMoveToPointEnabled="True" InputMethod.IsInputMethodEnabled="False"
                                 PreviewMouseLeftButtonDown="PreviewSeek_PointerDown" PreviewMouseLeftButtonUp="PreviewSeek_PointerUp" ToolTip="拖曳試看／定位播放頭" />
                         <WrapPanel HorizontalAlignment="Center" Margin="0,6,0,0">
-                            <Button x:Name="PreparePreviewButton" Content="更新" Click="PreparePreview_Click" Padding="8,5" ToolTip="準備完整預覽；內容未變更時重用快取" />
+                            <Button x:Name="PreparePreviewButton" Content="更新" Click="PreparePreview_Click" Padding="8,5" ToolTip="準備預覽；即時預覽模式下只載入音訊，剪輯後不需重新快取" />
                             <Button Content="‹" Click="FrameBack_Click" Padding="8,5" ToolTip="前一格 · ←" AutomationProperties.Name="前一格" />
                             <Button x:Name="PreviewPlayButton" Content="播放" Click="PreviewPlay_Click" Padding="8,5" ToolTip="Space" />
                             <Button x:Name="PreviewStopButton" Content="停止" Click="PreviewStop_Click" Padding="8,5" />

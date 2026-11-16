@@ -90,10 +90,13 @@ public partial class MainWindow
     internal void RefreshPreviewState()
     {
         if (!_previewInitialized || _previewShutdown) return;
+        // Track lists can be edited in place, so any project refresh rebuilds the live picture plan.
+        InvalidateLivePlan();
         PlayheadSeconds = Math.Clamp(PlayheadSeconds, 0, PreviewDuration);
         if (!PreviewIsReady && !_previewPreparing)
             PreviewHint.Text = PreviewDuration <= 0 ? "將素材放入軌道，開始編輯" : PreviewRenderCache.IsAudioOnly(_project)
                 ? "音訊專案 · 按播放直接試聽\n首次載入曲目後可直接定位與重播"
+                : LiveMode ? "拖曳時間尺定位 · 按「播放」即時預覽\n「暫存快取」可預先載入素材，之後剪輯不需重新快取"
                 : "拖曳時間尺定位\n按「播放」準備完整預覽，之後可直接定位與重播";
         RefreshPreviewControls();
     }
@@ -107,13 +110,15 @@ public partial class MainWindow
         Tracks = [.. _project.Tracks], Clips = [.. _project.Clips]
     };
 
-    private static string PreviewContentKey(CutProject snapshot) => PreviewRenderCache.CreateKey(snapshot) +
-        (PreviewRenderCache.IsAudioOnly(snapshot) ? "" : $"|{EditorPreferences.Current.PreviewWidth}|{EditorPreferences.Current.UseVideoProxies}");
+    private string PreviewContentKey(CutProject snapshot) => PreviewRenderCache.CreateKey(snapshot) +
+        (PreviewRenderCache.IsAudioOnly(snapshot) ? "" : LiveMode ? "|live"
+            : $"|{EditorPreferences.Current.PreviewWidth}|{EditorPreferences.Current.UseVideoProxies}");
 
     // Names, locks, selection and lossless razor cuts do not change the rendered sound.
     // Keep both the playing clock and an in-flight preload when the content is identical.
     private void RefreshPreviewAfterEdit()
     {
+        InvalidateLivePlan();
         if (_previewRenderKey is not null && (PreviewIsReady || _previewPreparing) &&
             _previewRenderKey == PreviewContentKey(CreatePreviewSnapshot()))
         { RefreshPreviewControls(); return; }
@@ -130,6 +135,7 @@ public partial class MainWindow
     internal void InvalidatePreview()
     {
         ClearAudition(resetDevice: false);
+        InvalidateLivePlan();
         _previewRevision++;
         _previewFrameRequest++;
         _previewFrameCancellation?.Cancel();
@@ -165,6 +171,7 @@ public partial class MainWindow
     {
         if (_previewShutdown) return;
         InvalidatePreview();
+        ShutdownLivePreview();
         _previewShutdown = true;
         _previewFrameCancellation?.Cancel();
         _previewTimer.Stop();
@@ -232,15 +239,20 @@ public partial class MainWindow
         _previewPlayWhenReady = playWhenReady;
         var folder = PreviewFolder;
         var audioOnly = PreviewRenderCache.IsAudioOnly(snapshot);
+        // Live mode plays every project through the real-time mixer; pictures are composited per frame.
+        var live = audioOnly || LiveMode;
         var output = string.Empty;
-        var reused = !audioOnly && PreviewCache.TryGet(key, out output);
-        if (!audioOnly && !reused) output = Path.Combine(folder, $"preview-{revision}.mp4");
-        var preparingLabel = audioOnly ? "正在載入曲目" : "正在準備完整影音快取";
+        var reused = !live && PreviewCache.TryGet(key, out output);
+        if (!live && !reused) output = Path.Combine(folder, $"preview-{revision}.mp4");
+        var preparingLabel = audioOnly ? "正在載入曲目" : live ? "正在載入音訊" : "正在準備完整影音快取";
         PreviewHint.Text = reused ? "正在開啟已暫存的預覽…" : $"{preparingLabel}… 0%";
         PreviewRangeText.Text = $"播放區間 {FormatPreviewTime(_previewRangeStart)} – {FormatPreviewTime(_previewRangeEnd)}";
-        StatusText.Text = audioOnly ? "首次解碼曲目後直接即時混音播放，無須製作整首混音檔" : "首次準備後可直接定位與重播；可繼續定位，修改影音內容才需更新";
+        StatusText.Text = audioOnly ? "首次解碼曲目後直接即時混音播放，無須製作整首混音檔"
+            : live ? "即時預覽：素材只需暫存一次，之後剪輯不必重新快取"
+            : "首次準備後可直接定位與重播；可繼續定位，修改影音內容才需更新";
         RefreshPreviewControls();
-        var phase = audioOnly ? "載入音訊來源" : "製作影音快取";
+        if (live && !audioOnly) RefreshLiveFrame();
+        var phase = live ? "載入音訊來源" : "製作影音快取";
         var started = System.Diagnostics.Stopwatch.StartNew();
         PreviewDiagnostics.Write("prepare-start", $"revision={revision}; audioOnly={audioOnly}; duration={PreviewDuration:0.###}; videoRenderCacheHit={reused}");
         try
@@ -251,7 +263,7 @@ public partial class MainWindow
                 if (_previewShutdown || revision != _previewRevision || cancellation.IsCancellationRequested) return;
                 PreviewHint.Text = $"{preparingLabel}… {Math.Clamp(value.Fraction, 0, 1):P0}\n{value.Message}";
             });
-            if (audioOnly)
+            if (live)
             {
                 // Yield once so pending transport/navigation input remains responsive even
                 // when all decoded source files are already cached.
@@ -270,10 +282,20 @@ public partial class MainWindow
                     device.Seek(AudioSampleClock.At(PlayheadSeconds));
                     _previewReadyRevision = revision;
                     _previewOpened = true;
-                    PreviewStillImage.Visibility = Visibility.Collapsed;
-                    PreviewHint.Visibility = Visibility.Collapsed;
-                    PreviewRangeText.Text = "音訊即時混音 · 可直接定位與重播";
-                    StatusText.Text = "音訊已就緒 · 直接即時混音播放";
+                    if (audioOnly)
+                    {
+                        PreviewStillImage.Visibility = Visibility.Collapsed;
+                        PreviewHint.Visibility = Visibility.Collapsed;
+                        PreviewRangeText.Text = "音訊即時混音 · 可直接定位與重播";
+                        StatusText.Text = "音訊已就緒 · 直接即時混音播放";
+                    }
+                    else
+                    {
+                        PreviewRangeText.Text = "即時預覽 · 剪輯後不需重新快取";
+                        StatusText.Text = "即時預覽已就緒 · 移動、修剪、切割與 Fade 後可直接播放";
+                        if (!RefreshLiveFrame()) PreviewHint.Text = "此段畫面仍在暫存，完成後自動顯示…";
+                        StartLiveCachingIfNeeded();
+                    }
                     PreviewDiagnostics.Write("audio-ready", $"revision={revision}; elapsedMs={started.ElapsedMilliseconds}");
                     if (_previewPlayWhenReady) StartPreviewPlayback();
                     return;
@@ -336,6 +358,8 @@ public partial class MainWindow
                 _previewPreparing = false;
                 _previewPlayWhenReady = false;
                 RefreshPreviewControls();
+                // Until this source's frames are stored, a paused playhead still gets a rendered frame.
+                if (live && !audioOnly && !_previewPlaying && PreviewLiveView.Visibility != Visibility.Visible) QueuePreviewFrame();
             }
         }
     }
@@ -496,7 +520,15 @@ public partial class MainWindow
     {
         MediaWorkScheduler.NotifyInteraction();
         _previewFrameCancellation?.Cancel();
-        if (!_previewInitialized || _previewShutdown || PreviewDuration <= 0 || _previewPreparing) return;
+        if (!_previewInitialized || _previewShutdown || PreviewDuration <= 0) return;
+        if (RefreshLiveFrame())
+        {
+            // Stored source frames composite immediately: no debounce and no render process.
+            _previewFrameTask = Task.CompletedTask;
+            if (!PreviewIsReady && !_previewPreparing) PreviewRangeText.Text = $"目前畫面 {FormatPreviewTime(PlayheadSeconds)} · 即時預覽";
+            return;
+        }
+        if (_previewPreparing) return;
         if (PreviewRenderCache.IsAudioOnly(_project))
         {
             PreviewStillImage.Source = null;
@@ -576,9 +608,14 @@ public partial class MainWindow
         _previewPlaybackFarthest = Math.Max(0, PlayheadSeconds - _previewRangeStart);
         if (PreviewIsReady && (PreviewContains(PlayheadSeconds) || PlayheadSeconds == _previewRangeEnd))
         {
-            _previewFrameCancellation?.Cancel();
-            PreviewStillImage.Visibility = Visibility.Collapsed;
-            PreviewHint.Visibility = Visibility.Collapsed;
+            var liveVideo = _audioDevice is not null && EnsureLivePlan();
+            var liveShown = liveVideo && RefreshLiveFrame();
+            if (!liveVideo || liveShown)
+            {
+                _previewFrameCancellation?.Cancel();
+                PreviewStillImage.Visibility = Visibility.Collapsed;
+                PreviewHint.Visibility = Visibility.Collapsed;
+            }
             try
             {
                 if (_audioDevice is { } audio)
@@ -591,6 +628,7 @@ public partial class MainWindow
             }
             catch (Exception ex) when (_audioDevice is not null && ex is InvalidOperationException or IOException)
             { ReportAudioPreviewFailure(ex); }
+            if (liveVideo && !liveShown && !_previewPlaying) QueuePreviewFrame();
         }
         else
         {
@@ -675,6 +713,7 @@ public partial class MainWindow
         }
         finally { _updatingPreviewSeek = false; }
         PreviewTimeText.Text = $"{FormatPreviewTime(PlayheadSeconds)} / {FormatPreviewTime(PreviewDuration)}";
+        RefreshLiveFrame();
     }
     private static string FormatPreviewTime(double seconds)
     {
@@ -696,6 +735,7 @@ public partial class MainWindow
         PreviewPlayer.IsMuted = true;
         try
         {
+            await RunLivePreviewSmokeAsync(folder);
             // Exercise a real outstanding request: invalidating must prevent its continuation
             // from loading obsolete media even if the encoder finishes concurrently.
             var obsolete = PreparePreviewAsync();

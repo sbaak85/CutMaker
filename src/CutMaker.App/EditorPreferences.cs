@@ -8,7 +8,8 @@ internal enum PreviewQuality { Low, Medium, High }
 internal sealed record EditorPreferences(PreviewQuality PreviewQuality = PreviewQuality.Medium, int CacheGiB = 4,
     ExportVideoQuality ExportQuality = ExportVideoQuality.Balanced, int AudioBitrate = 192,
     string ExportFolder = "", int ExportFormat = 1, bool UseVideoProxies = false,
-    FadeSettings? FadeInPreset = null, FadeSettings? FadeOutPreset = null)
+    FadeSettings? FadeInPreset = null, FadeSettings? FadeOutPreset = null,
+    bool LivePreview = true)
 {
     internal static string Root => Environment.GetEnvironmentVariable("CUTMAKER_DATA_DIR") ??
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CutMaker");

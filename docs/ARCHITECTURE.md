@@ -10,6 +10,10 @@
 
 Pointer hit areas, precision scaling, snap guides and numeric hints share the actual edit candidates. Fade presets apply an atomic batch. Junction audition uses a sample-accurate audio end limit and reuses the same device on loops; video stopping is timer-driven. Per-project sidecar view files and global preferences live outside project documents. F1 documents input focus rules. These replace the session-only view and full-video-rebuild behavior described in older design notes below.
 
+## Live video preview
+
+`VideoFrameCache` stores one constant-rate MJPEG frame sequence per source (`video-frames/*.cmf`, keyed by path, size, write time, preview size and FFmpeg identity, with an offset table and trailer). Frames start at source time zero and are independently decodable, so no timeline edit can invalidate them. A store is usable while it is still being written; the published file is held open as its lease. `MainWindow.LivePreview` builds a plan of visible video-track clips, maps the playhead to a source frame index, applies `FadeEnvelope` as layer opacity (or a black overlay for Black mode) and draws the layers in `LiveFrameView`, lower track index in front as in the export graph. Sound and the transport clock come from `AudioTimelinePreview`/`PcmAudioDevice` for every project, so playback after an edit only rebuilds the lightweight mix plan. Missing frames fall back to the debounced single-frame render while paused. The rendered whole-timeline file path remains behind the `LivePreview` preference and is what the older offscreen regressions exercise. Not covered: real-time effects beyond fades, frame-exact parity with export for variable-frame-rate sources, and transparent stills under Black fades.
+
 ## Foundation
 
 - .NET 10 WPF on Windows x64; native resizable panels, no embedded browser or NuGet packages.

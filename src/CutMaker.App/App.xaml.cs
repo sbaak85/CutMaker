@@ -25,6 +25,8 @@ public partial class App : Application
             window.Left = -20000;
             window.Top = -20000;
             window.SuppressClosePrompt = true;
+            // Existing regressions cover the rendered-file path; the live path has its own check.
+            window.UseRenderedPreviewForChecks = true;
         }
         window.Show();
         if (smoke) window.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () =>
